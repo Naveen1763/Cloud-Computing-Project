@@ -40,6 +40,15 @@ FEATURED: list[tuple[str, str]] = [
 
 AUTOPLAY_DELAY = 0.9  # seconds between steps
 
+# AAPA Table III. A lower target keeps each pod less loaded, so it needs more
+# pods for the same traffic - which is why the choice within the set matters.
+TARGET_CPU = {
+    "SPIKE": 0.30,
+    "RAMP": 0.60,
+    "STATIONARY_NOISY": 0.55,
+    "PERIODIC": 0.75,
+}
+
 
 # --------------------------------------------------------------------------
 # Data
@@ -184,38 +193,68 @@ pset = [p for p in str(row.prediction_set).split("|") if p]
 hedged = len(pset) > 1
 demand, prov_a, prov_o = int(row.required), int(row[P_A]), int(row[P_O])
 
-d1, d2, d3 = st.columns(3)
+d1, d2 = st.columns([1, 1])
 
 with d1:
     st.markdown("##### 1 · Traffic arrives")
     st.markdown(
-        f"Current window peaks at **{int(row.current_load)} pods** of load.  \n"
+        f"This window peaks at **{int(row.current_load)} pods** of raw load.\n\n"
         f"True archetype: **{row.archetype_true.title()}**"
     )
 
 with d2:
-    st.markdown("##### 2 · The classifier is unsure")
+    st.markdown("##### 2 · The classifier cannot decide")
     st.markdown(f"Top guess: **{row.archetype_predicted.title()}**")
     st.markdown("Cannot rule out: " + " ".join(f"`{p.title()}`" for p in pset))
-    st.caption(
-        "Two or more remain plausible — hedging applies."
-        if hedged else
-        "Only one remains plausible — we size for it directly."
-    )
 
-with d3:
-    st.markdown("##### 3 · Both commit")
+st.markdown("##### 3 · Each controller picks from that set")
+
+import math
+load = int(row.current_load)
+top1 = str(row.archetype_predicted)
+# Ours sizes for whichever member needs the most pods.
+ours_pick = max(pset, key=lambda a: math.ceil(load / TARGET_CPU.get(a, 0.55)))
+
+choice_rows = []
+for a in sorted(pset, key=lambda x: -TARGET_CPU.get(x, 0.55)):
+    target = TARGET_CPU.get(a, 0.55)
+    implied = math.ceil(load / target)
+    who = []
+    if a == top1:
+        who.append("AAPA")
+    if a == ours_pick:
+        who.append("Ours")
+    choice_rows.append({
+        "Archetype in set": a.title(),
+        "CPU target": f"{target:.0%}",
+        "Pods it implies": f"{implied:,}",
+        "Chosen by": " + ".join(who) if who else "—",
+    })
+
+cc1, cc2 = st.columns([3, 2])
+with cc1:
+    st.dataframe(pd.DataFrame(choice_rows), width="stretch", hide_index=True)
+    st.caption(
+        "A lower CPU target keeps each pod less loaded, so it needs more pods "
+        "for the same traffic. AAPA commits to its single top guess (then adds "
+        "its confidence margin); we commit to whichever member of the set "
+        "needs the most."
+    )
+with cc2:
     st.markdown(
-        f"<span style='color:{AAPA_COLOR}'><b>AAPA</b></span> provisions "
-        f"**{prov_a}** pods  \n"
-        f"<span style='color:{OURS_COLOR}'><b>Ours</b></span> provisions "
-        f"**{prov_o}** pods",
+        f"<div style='line-height:1.9'>"
+        f"<span style='color:{AAPA_COLOR}'><b>AAPA</b></span> picks "
+        f"<b>{top1.title()}</b> → provisions <b>{prov_a:,}</b> pods<br>"
+        f"<span style='color:{OURS_COLOR}'><b>Ours</b></span> picks "
+        f"<b>{ours_pick.title()}</b> → provisions <b>{prov_o:,}</b> pods"
+        f"</div>",
         unsafe_allow_html=True,
     )
-    st.caption(
-        "AAPA sizes for its single guess plus a fixed margin; we size for the "
-        "most demanding archetype still plausible."
-    )
+    if not hedged:
+        st.caption(
+            "Only one archetype is plausible here, so both pick the same one "
+            "— they differ only by AAPA's margin."
+        )
 
 st.markdown(f"##### 4 · Demand arrives: **{demand} pods** needed")
 
