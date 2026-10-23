@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """
-Replay one workload decision by decision, AAPA against ours.
+Replay one scaling decision at a time, revealed stage by stage.
 
-The headline numbers say the method works. This page shows the mechanism:
-traffic arrives, the classifier guesses, the conformal set names what cannot
-be ruled out, both controllers commit to a pod count, and then real demand
-arrives and settles it. A running scoreboard accumulates violations so the
-moment hedging prevents one is visible as it happens.
+Pick a window, explore what each archetype in the prediction set would cost,
+then uncover AAPA's choice, ours, the demand that actually arrived, and the
+outcome — one click at a time, so an audience follows the reasoning rather
+than being shown a conclusion.
 """
 
+import math
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -30,24 +29,28 @@ DEMAND_COLOR = "#111111"
 
 REQUIRED_COLUMNS = {"workload_id", "window_start_minute", "prediction_set"}
 
-# Curated examples rather than a dropdown over every workload: both contain
-# many windows where hedging changed the outcome, so the replay lands on
-# something worth watching.
+# Curated rather than a dropdown over every workload: both contain many
+# windows where hedging changes the outcome.
 FEATURED: list[tuple[str, str]] = [
     ("w_0056", "Stationary — 25 saves"),
     ("w_0295", "Periodic — 10 saves"),
 ]
 
-AUTOPLAY_DELAY = 0.9  # seconds between steps
-
 # AAPA Table III. A lower target keeps each pod less loaded, so it needs more
-# pods for the same traffic - which is why the choice within the set matters.
+# pods for the same traffic — which is why the choice within the set matters.
 TARGET_CPU = {
     "SPIKE": 0.30,
     "RAMP": 0.60,
     "STATIONARY_NOISY": 0.55,
     "PERIODIC": 0.75,
 }
+
+STAGES = [
+    "The prediction set",
+    "What AAPA picks",
+    "What we pick",
+    "What demand actually was",
+]
 
 
 # --------------------------------------------------------------------------
@@ -86,15 +89,15 @@ if missing:
 
 st.title("How a violation gets prevented")
 st.markdown(
-    "One workload, replayed decision by decision. Each step is an hour-long "
-    "window: traffic arrives, the classifier guesses an archetype, the "
-    "conformal set names what it cannot rule out, both controllers commit to "
-    "a pod count — then real demand arrives and settles it."
+    "One scaling decision, uncovered a step at a time. The classifier cannot "
+    "always tell which archetype it is looking at — and because each archetype "
+    "implies a different amount of capacity, *which one you commit to* decides "
+    "whether the latency promise holds."
 )
 
 
 # --------------------------------------------------------------------------
-# Pick the workload
+# Workload and window
 # --------------------------------------------------------------------------
 
 available = set(decisions.workload_id.unique())
@@ -103,15 +106,11 @@ if not featured:
     st.info("None of the featured workloads are present in this result set.")
     st.stop()
 
-if len(featured) == 1:
-    workload = featured[0][0]
-    st.caption(f"Workload **{workload}** — {featured[0][1]}")
-else:
-    labels = {w: f"{w} · {note}" for w, note in featured}
-    workload = st.radio(
-        "Workload", [w for w, _ in featured],
-        format_func=lambda w: labels[w], horizontal=True,
-    )
+labels = {w: f"{w} · {note}" for w, note in featured}
+workload = st.radio(
+    "Workload", [w for w, _ in featured],
+    format_func=lambda w: labels[w], horizontal=True,
+)
 
 wl = decisions[decisions.workload_id == workload]
 wide = wl.pivot_table(
@@ -125,220 +124,218 @@ wide = wide.sort_values("window_start_minute").reset_index(drop=True)
 
 P_A, P_O = f"provisioned_{BASELINE}", f"provisioned_{OURS}"
 V_A, V_O = f"violation_{BASELINE}", f"violation_{OURS}"
-n_steps = len(wide)
 
-# Windows where AAPA fell short and we held — the point of the exercise.
+# Windows where AAPA fell short and we held — the ones worth walking through.
 saves = wide.index[wide[V_A] & ~wide[V_O]].tolist()
+if not saves:
+    st.info("This workload has no window where hedging changed the outcome.")
+    st.stop()
 
+idx_key, stage_key = f"idx_{workload}", f"stage_{workload}"
+st.session_state.setdefault(idx_key, 0)
+st.session_state.setdefault(stage_key, 0)
 
-# --------------------------------------------------------------------------
-# Replay state
-# --------------------------------------------------------------------------
-
-key = f"step_{workload}"
-if key not in st.session_state:
-    st.session_state[key] = 0
-step = min(st.session_state[key], n_steps - 1)
-
-c1, c2, c3, c4, c5 = st.columns([1, 1, 1.4, 1.4, 3])
-if c1.button("Restart", width="stretch"):
-    st.session_state[key] = 0
-    st.rerun()
-if c2.button("Step", width="stretch", type="primary"):
-    st.session_state[key] = min(step + 1, n_steps - 1)
-    st.rerun()
-if c3.button("Next save", width="stretch",
-             help="Jump to the next window where hedging prevents a failure"):
-    nxt = next((s for s in saves if s > step), saves[0] if saves else step)
-    st.session_state[key] = nxt
-    st.rerun()
-if c4.button("Run to end", width="stretch"):
-    st.session_state[key] = n_steps - 1
-    st.rerun()
-autoplay = c5.toggle("Auto-play", value=False,
-                     help=f"Advance a step every {AUTOPLAY_DELAY:g}s")
-
+pick = st.session_state[idx_key] % len(saves)
+step = saves[pick]
 row = wide.iloc[step]
-elapsed = wide.iloc[: step + 1]
-aapa_fails = int(elapsed[V_A].sum())
-ours_fails = int(elapsed[V_O].sum())
-saves_so_far = int((elapsed[V_A] & ~elapsed[V_O]).sum())
 
-st.progress((step + 1) / n_steps,
-            text=f"Window {step + 1} of {n_steps} · minute "
-                 f"{int(row.window_start_minute):,}")
-
-
-# --------------------------------------------------------------------------
-# Scoreboard
-# --------------------------------------------------------------------------
-
-s1, s2, s3 = st.columns(3)
-s1.metric("AAPA — violations so far", aapa_fails,
-          help="Windows where AAPA provisioned less than demand required.")
-s2.metric("Ours — violations so far", ours_fails,
-          delta=f"{ours_fails - aapa_fails:+d} vs AAPA" if step else None,
-          delta_color="inverse",
-          help="Same windows, our controller.")
-s3.metric("Violations prevented", saves_so_far,
-          help="Windows where AAPA fell short and we held.")
+nav1, nav2, nav3 = st.columns([1.3, 1.3, 4])
+if nav1.button("◀ Previous case", width="stretch"):
+    st.session_state[idx_key] = (pick - 1) % len(saves)
+    st.session_state[stage_key] = 0
+    st.rerun()
+if nav2.button("Next case ▶", width="stretch"):
+    st.session_state[idx_key] = (pick + 1) % len(saves)
+    st.session_state[stage_key] = 0
+    st.rerun()
+nav3.caption(
+    f"Case {pick + 1} of {len(saves)} on {workload} · window starting at "
+    f"minute {int(row.window_start_minute):,} · true archetype "
+    f"**{row.archetype_true.title()}**"
+)
 
 
 # --------------------------------------------------------------------------
-# The current decision, in order
+# Decision facts
+# --------------------------------------------------------------------------
+
+pset = [p for p in str(row.prediction_set).split("|") if p]
+load = int(row.current_load)
+demand, prov_a, prov_o = int(row.required), int(row[P_A]), int(row[P_O])
+top1 = str(row.archetype_predicted)
+ours_pick = max(pset, key=lambda a: math.ceil(load / TARGET_CPU.get(a, 0.55)))
+
+
+def pods_for(archetype: str) -> int:
+    return math.ceil(load / TARGET_CPU.get(archetype, 0.55))
+
+
+stage = st.session_state[stage_key]
+
+st.markdown("---")
+st.markdown(f"**Traffic this window peaks at {load:,} pods of raw load.**")
+
+prog = st.columns([1, 1, 1, 1])
+for i, name in enumerate(STAGES):
+    mark = "●" if i <= stage else "○"
+    prog[i].markdown(
+        f"<span style='color:{'#1e88e5' if i <= stage else '#888'}'>"
+        f"{mark} {name}</span>",
+        unsafe_allow_html=True,
+    )
+
+
+# --------------------------------------------------------------------------
+# Stage 0 — explore the set
 # --------------------------------------------------------------------------
 
 st.markdown("---")
-pset = [p for p in str(row.prediction_set).split("|") if p]
-hedged = len(pset) > 1
-demand, prov_a, prov_o = int(row.required), int(row[P_A]), int(row[P_O])
+st.markdown("#### The classifier cannot rule these out")
 
-d1, d2 = st.columns([1, 1])
+explore = st.radio(
+    "Select an archetype to see the capacity it would require",
+    pset,
+    format_func=lambda a: a.title(),
+    horizontal=True,
+    key=f"explore_{workload}_{step}",
+)
 
-with d1:
-    st.markdown("##### 1 · Traffic arrives")
-    st.markdown(
-        f"This window peaks at **{int(row.current_load)} pods** of raw load.\n\n"
-        f"True archetype: **{row.archetype_true.title()}**"
+e1, e2 = st.columns([1, 2])
+e1.metric(
+    f"If it is {explore.title()}",
+    f"{pods_for(explore):,} pods",
+    help=f"{load:,} pods of load ÷ {TARGET_CPU.get(explore, 0.55):.0%} CPU target",
+)
+e2.markdown(
+    f"At a **{TARGET_CPU.get(explore, 0.55):.0%}** CPU target, each pod is kept "
+    f"that loaded — so serving {load:,} pods of traffic needs "
+    f"**{pods_for(explore):,}** pods.\n\n"
+    "A lower target means more headroom and therefore more pods. "
+    + (
+        f"Across this set the requirement ranges from "
+        f"**{min(pods_for(a) for a in pset):,}** to "
+        f"**{max(pods_for(a) for a in pset):,}** pods — which is the whole "
+        "problem."
+        if len(pset) > 1 else
+        "Only one archetype is plausible here."
     )
+)
 
-with d2:
-    st.markdown("##### 2 · The classifier cannot decide")
-    st.markdown(f"Top guess: **{row.archetype_predicted.title()}**")
-    st.markdown("Cannot rule out: " + " ".join(f"`{p.title()}`" for p in pset))
-
-st.markdown("##### 3 · Each controller picks from that set")
-
-import math
-load = int(row.current_load)
-top1 = str(row.archetype_predicted)
-# Ours sizes for whichever member needs the most pods.
-ours_pick = max(pset, key=lambda a: math.ceil(load / TARGET_CPU.get(a, 0.55)))
-
-choice_rows = []
-for a in sorted(pset, key=lambda x: -TARGET_CPU.get(x, 0.55)):
-    target = TARGET_CPU.get(a, 0.55)
-    implied = math.ceil(load / target)
-    who = []
-    if a == top1:
-        who.append("AAPA")
-    if a == ours_pick:
-        who.append("Ours")
-    choice_rows.append({
-        "Archetype in set": a.title(),
-        "CPU target": f"{target:.0%}",
-        "Pods it implies": f"{implied:,}",
-        "Chosen by": " + ".join(who) if who else "—",
-    })
-
-cc1, cc2 = st.columns([3, 2])
-with cc1:
-    st.dataframe(pd.DataFrame(choice_rows), width="stretch", hide_index=True)
-    st.caption(
-        "A lower CPU target keeps each pod less loaded, so it needs more pods "
-        "for the same traffic. AAPA commits to its single top guess (then adds "
-        "its confidence margin); we commit to whichever member of the set "
-        "needs the most."
-    )
-with cc2:
-    st.markdown(
-        f"<div style='line-height:1.9'>"
-        f"<span style='color:{AAPA_COLOR}'><b>AAPA</b></span> picks "
-        f"<b>{top1.title()}</b> → provisions <b>{prov_a:,}</b> pods<br>"
-        f"<span style='color:{OURS_COLOR}'><b>Ours</b></span> picks "
-        f"<b>{ours_pick.title()}</b> → provisions <b>{prov_o:,}</b> pods"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
-    if not hedged:
-        st.caption(
-            "Only one archetype is plausible here, so both pick the same one "
-            "— they differ only by AAPA's margin."
-        )
-
-st.markdown(f"##### 4 · Demand arrives: **{demand} pods** needed")
-
-if prov_a < demand <= prov_o:
-    st.success(
-        f"**Violation prevented.** AAPA had {prov_a} pods against {demand} "
-        f"needed — requests queue, the latency promise breaks. We had "
-        f"{prov_o}, because {', '.join(p.title() for p in pset if p != row.archetype_predicted)} "
-        f"could not be ruled out and needed more capacity than the top guess. "
-        f"**This is what the prediction set buys.**"
-    )
-elif prov_o < demand <= prov_a:
-    st.warning(
-        f"AAPA's margin carried it here and our hedging did not: AAPA "
-        f"{prov_a}, ours {prov_o}, demand {demand}."
-    )
-elif demand > max(prov_a, prov_o):
-    st.error(f"Both fell short — demand {demand}, AAPA {prov_a}, ours {prov_o}.")
+if stage < len(STAGES) - 1:
+    if st.button(f"Reveal: {STAGES[stage + 1].lower()} ▸", type="primary"):
+        st.session_state[stage_key] = stage + 1
+        st.rerun()
 else:
-    extra = prov_o - prov_a
-    st.info(
-        f"Both held. "
-        + (f"We carried {extra} pod{'s' if extra != 1 else ''} more than "
-           "needed this window — that is the cost side of hedging."
-           if extra > 0 else "Neither was stressed.")
-    )
+    if st.button("Start over"):
+        st.session_state[stage_key] = 0
+        st.rerun()
 
 
 # --------------------------------------------------------------------------
-# Timeline up to the current step
+# Stages 1-3 — the reveal
+# --------------------------------------------------------------------------
+
+if stage >= 1:
+    st.markdown("---")
+    st.markdown("#### What each controller committed to")
+    c1, c2 = st.columns(2)
+
+    with c1:
+        st.markdown(
+            f"<span style='color:{AAPA_COLOR};font-size:1.1rem'><b>AAPA</b>"
+            "</span>", unsafe_allow_html=True,
+        )
+        st.markdown(
+            f"Commits to its single best guess: **{top1.title()}**  \n"
+            f"That archetype implies **{pods_for(top1):,}** pods, plus its "
+            f"confidence margin."
+        )
+        st.metric("AAPA provisions", f"{prov_a:,} pods")
+
+    with c2:
+        if stage >= 2:
+            st.markdown(
+                f"<span style='color:{OURS_COLOR};font-size:1.1rem'><b>Ours"
+                "</b></span>", unsafe_allow_html=True,
+            )
+            st.markdown(
+                f"Commits to the most demanding archetype still plausible: "
+                f"**{ours_pick.title()}**  \n"
+                f"No margin — the set itself says how much to hedge."
+            )
+            st.metric("We provision", f"{prov_o:,} pods",
+                      delta=f"{prov_o - prov_a:+,} vs AAPA")
+        else:
+            st.caption("Not revealed yet.")
+
+if stage >= 3:
+    st.markdown("---")
+    st.markdown(f"#### Demand arrived: **{demand:,} pods** needed")
+
+    r1, r2, r3 = st.columns(3)
+    r1.metric("AAPA had", f"{prov_a:,}",
+              delta=f"{prov_a - demand:+,} vs demand",
+              delta_color="normal" if prov_a >= demand else "inverse")
+    r2.metric("We had", f"{prov_o:,}",
+              delta=f"{prov_o - demand:+,} vs demand",
+              delta_color="normal" if prov_o >= demand else "inverse")
+    r3.metric("True archetype", row.archetype_true.title())
+
+    if prov_a < demand <= prov_o:
+        st.success(
+            f"**SLO violation in AAPA — prevented in ours.**\n\n"
+            f"AAPA committed to {top1.title()} and had **{prov_a:,}** pods "
+            f"against **{demand:,}** needed. It is short by "
+            f"**{demand - prov_a:,}** — requests queue and the latency promise "
+            f"breaks.\n\n"
+            f"We could not rule out **{ours_pick.title()}**, which needs more "
+            f"capacity, so we provisioned **{prov_o:,}** and absorbed it. "
+            f"**That is what the prediction set buys.**"
+        )
+    elif prov_o < demand <= prov_a:
+        st.warning(
+            f"AAPA's margin carried it here and our hedging did not: "
+            f"AAPA {prov_a:,}, ours {prov_o:,}, demand {demand:,}."
+        )
+    elif demand > max(prov_a, prov_o):
+        st.error(
+            f"Both fell short — demand {demand:,} against AAPA's {prov_a:,} "
+            f"and our {prov_o:,}."
+        )
+    else:
+        st.info(
+            f"Both held. We carried {prov_o - prov_a:,} pods more than AAPA, "
+            "which was not needed this window — the cost side of hedging."
+        )
+
+
+# --------------------------------------------------------------------------
+# Context
 # --------------------------------------------------------------------------
 
 st.markdown("---")
 view = wide.iloc[: step + 1]
-
 fig = go.Figure()
 fig.add_trace(go.Scatter(
     x=view.window_start_minute, y=view.required, name="Demand",
-    mode="lines", line=dict(color=DEMAND_COLOR, width=3),
-    hovertemplate="minute %{x}<br>demand %{y} pods<extra></extra>",
-))
+    mode="lines", line=dict(color=DEMAND_COLOR, width=3)))
 fig.add_trace(go.Scatter(
     x=view.window_start_minute, y=view[P_A], name="AAPA provisioned",
-    mode="lines", line=dict(color=AAPA_COLOR, width=2, dash="dot"),
-    hovertemplate="minute %{x}<br>AAPA %{y} pods<extra></extra>",
-))
+    mode="lines", line=dict(color=AAPA_COLOR, width=2, dash="dot")))
 fig.add_trace(go.Scatter(
     x=view.window_start_minute, y=view[P_O], name="Ours provisioned",
-    mode="lines", line=dict(color=OURS_COLOR, width=2, dash="dot"),
-    hovertemplate="minute %{x}<br>ours %{y} pods<extra></extra>",
-))
-
-saved_rows = view[view[V_A] & ~view[V_O]]
-if len(saved_rows):
-    fig.add_trace(go.Scatter(
-        x=saved_rows.window_start_minute, y=saved_rows.required,
-        name="Violation prevented", mode="markers",
-        marker=dict(symbol="star", size=15, color="#2e7d32",
-                    line=dict(width=1, color="#111")),
-        hovertemplate="minute %{x}<br>AAPA fell short, we held<extra></extra>",
-    ))
-
+    mode="lines", line=dict(color=OURS_COLOR, width=2, dash="dot")))
 fig.add_vline(x=float(row.window_start_minute), line_width=2,
               line_dash="dash", line_color="#888")
 fig.update_layout(
-    template="plotly_white", height=380,
+    template="plotly_white", height=330,
     margin=dict(l=60, r=30, t=30, b=50),
     xaxis_title="Minute of trace", yaxis_title="Pods",
-    xaxis=dict(range=[float(wide.window_start_minute.min()),
-                      float(wide.window_start_minute.max())]),
     legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
     font=dict(size=13),
 )
 st.plotly_chart(fig, width="stretch")
-
 st.caption(
-    f"Replaying {workload}. Across the full run, hedging prevents "
-    f"{len(saves)} violation{'s' if len(saves) != 1 else ''} on this workload "
-    "alone. Pod counts follow each archetype's CPU target: Periodic 1.33×, "
-    "Ramp 1.67×, Stationary 1.82×, Spike 3.33× the raw load."
+    f"Capacity up to this window. Hedging prevents {len(saves)} violations on "
+    f"{workload} alone."
 )
-
-# Auto-advance last, so the page above is already drawn.
-if autoplay and step < n_steps - 1:
-    time.sleep(AUTOPLAY_DELAY)
-    st.session_state[key] = step + 1
-    st.rerun()
