@@ -284,7 +284,7 @@ with right:
             "Our method with the prediction set removed — it simply uses the "
             "single best archetype guess."
         )
-        st.error(
+        st.success(
             f"It fails **{int(ctrl.failures):,}** times against our "
             f"**{int(ours.failures):,}**. Paired, the split is **43–0**: there "
             "are 43 windows it fails and we handle, and none the other way."
@@ -345,87 +345,7 @@ st.dataframe(
     hide_index=True,
 )
 
-
-# --------------------------------------------------------------------------
-# Context, collapsed
-# --------------------------------------------------------------------------
-
 st.markdown("---")
-
-with st.expander("How this was measured"):
-    st.markdown(
-        f"""
-**SLO violations and compute** come from a decision-level harness over
-**{n_decisions:,} scaling decisions**. Both controllers see the same window and
-are judged against the capacity the next window actually demanded, so the
-difference is attributable to decision logic alone — no queueing noise, no
-run-to-run variance.
-
-**Scaling actions** come from the SimPy discrete-event simulator over 24
-workloads, which models cooldowns and pod startup. The decision-level harness
-scores windows independently and so cannot express churn.
-
-These are two different harnesses with different cost units, so the columns are
-separate findings rather than one experiment. In the simulator the two methods
-are level on SLO violations (0.026 vs 0.026); the decision-level harness is
-where the reliability difference appears, because it removes queueing noise.
-
-**Data:** 200 workloads from the Kubernetes Serverless Workload Dataset —
-14-day per-minute traces derived from Azure Functions — split by workload so no
-trace appears in both training and test.
-"""
-    )
-
-with st.expander("Scope and limitations"):
-    st.markdown(
-        """
-**The compute saving is an aggregate.** We are *more* expensive on 95.8% of
-individual windows (+1 to +2 pods). The saving comes from roughly 2,000 large
-windows where AAPA's multiplicative margin scales with the provisioning base
-while our hedging is bounded by the archetype capacity ladder. Total compute is
-lower; the typical decision costs slightly more.
-
-**There is a capacity ceiling.** Archetypes form a ladder — PERIODIC 1.33×,
-RAMP 1.67×, STATIONARY 1.82×, SPIKE 3.33×. Taking the maximum over the
-prediction set adds capacity only when the set holds something more demanding
-than the top-ranked guess. When SPIKE is predicted it is already the highest
-rung, so hedging adds nothing and the method degenerates to the control. The
-result above therefore holds where the top-ranked archetype is **not** the most
-resource-intensive one.
-
-**Coverage is not uniform.** PERIODIC coverage measures 0.739 against a 0.90
-target, attributable to drift between calibration and test. Overall coverage
-holds at 0.939.
-
-**Single-seed.** The workload split is the dominant variance source; repeated
-trials with confidence intervals are needed before these numbers are final.
-"""
-    )
-
-with st.expander("What we found in the original evaluation"):
-    st.markdown(
-        """
-Three defects were identified while reproducing AAPA, each inflating the
-apparent reliability of the published classifier:
-
-1. **The train/test split leaks.** It splits by day, so the same workload
-   appears in training and test. Archetype is constant per workload, so the
-   classifier can memorise rather than generalise. Fixing it: accuracy
-   96.4% → 90.7%, and predictions naming a single archetype collapse from
-   **95.2% → 1.4%**. The confidence was an artefact.
-
-2. **The labels are circular.** Weak-supervision labels are computed from the
-   same statistics given to the classifier as features, and agree with the
-   dataset's ground-truth archetypes only **18.6%** of the time — which
-   explains the reported 99.8% accuracy.
-
-3. **SPIKE is deleted before evaluation.** A filter drops workloads active in
-   fewer than 10% of minutes. Bursty traffic is idle by definition, so it
-   removes **42 of 43 SPIKE workloads** — the archetype the paper's strongest
-   claims rest on.
-"""
-    )
-
 st.caption(
     "Conformal implementation cross-validated against MAPIE: LAC agrees "
     "set-for-set at every α; randomised APS agrees on coverage and set size. "

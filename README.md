@@ -60,8 +60,8 @@ One sidebar toggle adds the **ablation control** — our method with the
 prediction set removed — which is the evidence that the set, rather than any
 incidental simplification of AAPA, produces the result.
 
-Collapsible sections cover how it was measured, scope and limitations, and the
-three defects found in the original evaluation.
+Measurement detail, scope limitations and the three defects found in the
+original evaluation are documented below and in `AAPA_Conformal_Report.docx`.
 
 For a terminal summary instead:
 
