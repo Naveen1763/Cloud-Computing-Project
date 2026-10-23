@@ -45,6 +45,22 @@ BASELINE = "AAPA_Beta"
 OURS = "Conformal_TargetOnly"
 CONTROL = "Top1_NoMargin_control"
 
+# The headline comparison is the paper's method against ours. Everything else
+# is context: HPA and the generic predictive autoscaler are reference points,
+# the ablation control exists to prove the prediction set is responsible, and
+# the envelope variant is a design alternative. Focus mode hides them.
+FOCUS_CONTROLLERS = [BASELINE, OURS]
+FOCUS_WITH_CONTROL = [BASELINE, OURS, CONTROL]
+
+
+def focus(decisions: pd.DataFrame, enabled: bool = True,
+          with_control: bool = False) -> pd.DataFrame:
+    """Restrict a decision frame to the headline comparison."""
+    if not enabled:
+        return decisions
+    keep = FOCUS_WITH_CONTROL if with_control else FOCUS_CONTROLLERS
+    return decisions[decisions.controller.isin(keep)]
+
 
 @dataclass(frozen=True)
 class Experiment:
@@ -345,6 +361,19 @@ SIM_COLOR = {
 
 SIM_BASELINE = "AAPA"
 SIM_OURS = "Conformal_TargetOnly"
+SIM_CONTROL = "Top1_TargetOnly_control"
+
+SIM_FOCUS = [SIM_BASELINE, SIM_OURS]
+SIM_FOCUS_WITH_CONTROL = [SIM_BASELINE, SIM_OURS, SIM_CONTROL]
+
+
+def focus_simulation(sim: pd.DataFrame, enabled: bool = True,
+                     with_control: bool = False) -> pd.DataFrame:
+    """Restrict simulator rows to the headline comparison."""
+    if not enabled:
+        return sim
+    keep = SIM_FOCUS_WITH_CONTROL if with_control else SIM_FOCUS
+    return sim[sim.autoscaler.isin(keep)]
 
 # Metrics that showed no separation between controllers in this simulation -
 # every method lands within ~2ms on latency and within 0.002 on utilisation,

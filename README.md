@@ -63,6 +63,12 @@ loads instantly.
 The sidebar switches between four saved runs, so the effect of the train/test
 split and the load regime can be compared side by side.
 
+By default every page shows the headline comparison — **AAPA (the paper's
+method) against ours**. Two sidebar toggles widen it: *Include ablation
+control* adds the no-hedge control that evidences the prediction set is
+responsible, and turning off *AAPA vs ours only* brings in HPA, the generic
+predictive autoscaler and the envelope variant.
+
 For a terminal summary instead:
 
 ```bash

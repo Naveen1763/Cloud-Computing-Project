@@ -36,6 +36,8 @@ from dashboard.data import (
     load_decisions,
     load_report,
     per_archetype,
+    focus,
+    focus_simulation,
     load_simulation,
     metric_separation,
     simulation_available,
@@ -107,7 +109,31 @@ exp = st.sidebar.selectbox(
 )
 st.sidebar.caption(exp.blurb)
 
-decisions, report = get_run(exp)
+st.sidebar.markdown("---")
+st.sidebar.markdown("**Comparison**")
+focus_mode = st.sidebar.toggle(
+    "AAPA vs ours only",
+    value=True,
+    help=(
+        "On: show only the paper's method against ours. Off: include HPA, "
+        "the generic predictive autoscaler, the ablation control and the "
+        "envelope variant."
+    ),
+)
+show_control = False
+if focus_mode:
+    show_control = st.sidebar.toggle(
+        "Include ablation control",
+        value=False,
+        help=(
+            "The ablation control is our method with the prediction set "
+            "removed. It is the evidence that the set, rather than any "
+            "incidental simplification, produces the improvement."
+        ),
+    )
+
+decisions_all, report = get_run(exp)
+decisions = focus(decisions_all, focus_mode, show_control)
 stats = summarise(decisions)
 head = headline(stats)
 counts = window_counts(decisions)
@@ -162,10 +188,15 @@ if page == "Overview":
             ),
             (
                 "Ablation control",
-                f"{head['control_failures']:,}" if head["control_failures"] else "—",
-                f"{head['control_gap']:+.0f}%" if head["control_gap"] else None,
+                f"{head['control_failures']:,}",
+                f"{head['control_gap']:+.0f}%",
                 "Our method with the prediction set removed. The gap is what "
                 "the set contributes.",
+            ) if head["control_failures"] else (
+                "AAPA failures",
+                f"{head['base_failures']:,}",
+                None,
+                "The paper's method over the same decisions.",
             ),
             (
                 "Decisions evaluated",
@@ -183,7 +214,7 @@ if page == "Overview":
         )
     with right:
         st.subheader("Reading this")
-        if head["control_gap"] and head["violation_delta"] and head["violation_delta"] < 0:
+        if head["violation_delta"] is not None and head["violation_delta"] < 0:
             st.markdown(
                 f"Our controller breaks the latency promise **"
                 f"{head['ours_failures']:,}** times where AAPA breaks it "
@@ -192,14 +223,21 @@ if page == "Overview":
                 f"**{abs(head['cost_delta']):.1f}% "
                 f"{'less' if head['cost_delta'] < 0 else 'more'}** compute."
             )
-            st.markdown(
-                f"The **ablation control** is the same method with the "
-                f"shortlist removed. It fails "
-                f"**{head['control_failures']:,}** times — "
-                f"**{head['control_gap']:.0f}% more** than ours. That gap is "
-                f"the evidence the prediction set is doing the work, rather "
-                f"than some incidental simplification."
-            )
+            if head["control_gap"]:
+                st.markdown(
+                    f"The **ablation control** is the same method with the "
+                    f"shortlist removed. It fails "
+                    f"**{head['control_failures']:,}** times — "
+                    f"**{head['control_gap']:.0f}% more** than ours. That gap "
+                    f"is the evidence the prediction set is doing the work, "
+                    f"rather than some incidental simplification."
+                )
+            else:
+                st.caption(
+                    "Enable *Include ablation control* in the sidebar to see "
+                    "the evidence that the prediction set, rather than any "
+                    "incidental simplification, produces this result."
+                )
         else:
             st.markdown(
                 "On this run the conformal controller does **not** improve on "
@@ -451,7 +489,7 @@ elif page == "Stability & churn":
             "--max-workloads 24 --sim-minutes 360 --results-dir results_sim6`"
         )
     else:
-        sim = _simulation()
+        sim = focus_simulation(_simulation(), focus_mode, show_control)
         sim_stats = summarise_simulation(sim)
 
         if "AAPA" in sim_stats.index and SIM_OURS in sim_stats.index:
@@ -570,7 +608,7 @@ elif page == "Limitation":
     spike_exp = next((e for e in experiments if e.key == "spike"), None)
     if spike_exp:
         spike_dec, _ = get_run(spike_exp)
-        spike_stats = summarise(spike_dec)
+        spike_stats = summarise(focus(spike_dec, focus_mode, show_control))
         show = spike_stats[["label", "failures", "rate", "pods"]].copy()
         show.columns = ["Controller", "Failures", "Violation rate", "Mean pods"]
         st.dataframe(
