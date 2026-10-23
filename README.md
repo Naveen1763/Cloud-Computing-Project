@@ -332,6 +332,11 @@ fresh clone without the dataset**.
 
 ---
 
+## Contributors
+
+- **Naveen** ([@Naveen1763](https://github.com/Naveen1763))
+- **Tejas Bajaj** ([@theTazBaz](https://github.com/theTazBaz))
+
 ## License
 
 MIT — see [LICENSE](LICENSE). The underlying AAPA simulator is MIT licensed by
