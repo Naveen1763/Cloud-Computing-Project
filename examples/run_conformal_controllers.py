@@ -320,6 +320,10 @@ def main():
     rows = []
     cur_all = test_df["current_req_replicas"].to_numpy()
     nxt_all = test_df["next_req_replicas"].to_numpy()
+    # Identity and timing per window, so a single workload can be replayed
+    # decision by decision rather than only viewed in aggregate.
+    wl_all = test_df["function_hash"].to_numpy()
+    start_all = test_df["window_start_minute"].to_numpy()
 
     for i in range(len(test_df)):
         pset = [str(a) for a in pred_sets[i]]
@@ -335,8 +339,14 @@ def main():
             provisioned = decide(**ctx)
             violation = provisioned < required
             rows.append({
+                "workload_id": str(wl_all[i]),
+                "window_start_minute": int(start_all[i]),
                 "controller": name,
                 "archetype_true": str(y_test[i]),
+                "archetype_predicted": ctx["archetype"],
+                "prediction_set": "|".join(pset),
+                "confidence": ctx["confidence"],
+                "current_load": int(cur_all[i]),
                 "set_size": len(pset),
                 "is_ambiguous": len(pset) > 1,
                 "provisioned": provisioned,

@@ -43,6 +43,7 @@
     "conformal_method": "aps",
     "mondrian": true,
     "calib_fraction": 0.5,
+    "min_activity": 0.1,
     "load_multiplier": 60.0,
     "split": "workload",
     "seed": 42

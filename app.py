@@ -20,6 +20,7 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 from dashboard.data import (
+    ROOT,
     BASELINE,
     CONTROL,
     OURS,
@@ -53,8 +54,19 @@ CTRL_COLOR = "#b39ddb"
 # Data (cached — these are static files)
 # --------------------------------------------------------------------------
 
+def results_stamp() -> float:
+    """Modification times of the files the page reads, used as a cache key so
+    regenerated results are picked up without restarting the server."""
+    exp = find_experiment(MAIN)
+    paths = [
+        exp.directory / "controller_decisions.csv",
+        ROOT / "results_sim6" / "simulation_results.csv",
+    ]
+    return sum(p.stat().st_mtime for p in paths if p.exists())
+
+
 @st.cache_data(show_spinner=False)
-def load_all():
+def load_all(_stamp: float):
     exp = find_experiment(MAIN)
     decisions = load_decisions(exp)
     report = load_report(exp)
@@ -63,7 +75,7 @@ def load_all():
 
 
 try:
-    decisions, report, sim = load_all()
+    decisions, report, sim = load_all(results_stamp())
 except Exception as exc:  # results missing or unreadable
     st.error(
         f"Could not load results: {exc}\n\n"

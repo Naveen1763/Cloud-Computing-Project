@@ -60,8 +60,20 @@ One sidebar toggle adds the **ablation control** — our method with the
 prediction set removed — which is the evidence that the set, rather than any
 incidental simplification of AAPA, produces the result.
 
+A second page, **Walkthrough**, replays a single workload decision by decision
+— traffic arrives, the classifier guesses, the conformal set names what it
+cannot rule out, both controllers commit to a pod count, then real demand
+settles it. A running scoreboard accumulates violations for each method, and
+a *Next save* button jumps to the windows where hedging prevents a failure
+AAPA suffers.
+
 Measurement detail, scope limitations and the three defects found in the
 original evaluation are documented below and in `AAPA_Conformal_Report.docx`.
+
+> **Note:** `--min-activity 0.1` is required to reproduce the headline
+> numbers. It matches the windowing default under which they were measured;
+> omitting it keeps the SPIKE workloads and produces the different experiment
+> saved in `results_v2/`.
 
 For a terminal summary instead:
 
