@@ -57,6 +57,7 @@ loads instantly.
 | **Controller comparison** | Failures and cost/reliability charts, clean vs ambiguous split, per-archetype breakdown |
 | **Evaluation findings** | The three defects found in the original evaluation, each with before/after |
 | **Conformal analysis** | Coverage, set-size distribution, per-class coverage, MAPIE validation |
+| **Stability & churn** | Scaling actions per controller, three-axis comparison, metric-separation analysis |
 | **Limitation** | The capacity ladder and why set-based hedging stalls on SPIKE |
 
 The sidebar switches between four saved runs, so the effect of the train/test
@@ -83,6 +84,29 @@ to decision logic alone.
 | **AAPA (paper)** | **78** | **539.4** | baseline |
 | **Conformal sets (ours)** | **47** | **531.3** | **−40% violations** |
 | Conformal + warm pool | 47 | 534.3 | −40% violations |
+
+### Operational stability
+
+Reliability and cost are not the whole picture. Every scaling action
+terminates and starts pods, drains connections, and pays cold-start latency on
+the replacements, so a controller that thrashes is worse to run even at equal
+cost and SLO. Measured in the discrete-event simulator over 24 workloads:
+
+| Controller | SLO violation rate | Pod-minutes | **Scaling actions** |
+|---|---|---|---|
+| HPA | 0.0264 | 360.0 | **1.0** |
+| AAPA (paper) | 0.0256 | 667.4 | **47.6** |
+| **Conformal (ours)** | 0.0261 | 411.1 | **1.4** |
+
+AAPA performs **47.6 resize operations** per workload chasing archetype-specific
+policies; ours performs **1.4** — a 97% reduction at 38% less compute. This is
+the widest separation of any metric measured (47× against 2.1× for compute and
+1.35× for SLO violations).
+
+Latency, CPU utilisation and cold starts are *not* reported as evidence: all
+six controllers land within ~1% of each other on those in this simulation, so
+there is no difference to claim. The dashboard shows the full
+metric-separation analysis.
 
 ### Statistical validation
 

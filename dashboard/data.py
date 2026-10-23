@@ -301,3 +301,123 @@ CAPACITY_LADDER = pd.DataFrame(
     ],
     columns=["archetype", "target_cpu", "pods_per_unit_load"],
 )
+
+
+# --------------------------------------------------------------------------
+# Simulator results
+#
+# The decision-level harness scores each window independently, so it cannot
+# express scaling churn - there is no notion of "the previous decision". The
+# SimPy simulator does model it, with cooldowns and pod startup, so stability
+# metrics come from there.
+#
+# It uses its own controller names, mapped here onto the shared labels.
+# --------------------------------------------------------------------------
+
+SIM_RESULTS = ROOT / "results_sim6" / "simulation_results.csv"
+
+SIM_ORDER = [
+    "HPA",
+    "Generic_Predictive",
+    "AAPA",
+    "Top1_TargetOnly_control",
+    "Conformal_TargetOnly",
+    "AAPA_Conformal",
+]
+
+SIM_LABEL = {
+    "HPA": "HPA (reactive)",
+    "Generic_Predictive": "Generic predictive",
+    "AAPA": "AAPA (paper)",
+    "Top1_TargetOnly_control": "Ablation control",
+    "Conformal_TargetOnly": "Conformal (ours)",
+    "AAPA_Conformal": "Conformal + envelope",
+}
+
+SIM_COLOR = {
+    "HPA": "#9e9e9e",
+    "Generic_Predictive": "#8d6e63",
+    "AAPA": "#e53935",
+    "Top1_TargetOnly_control": "#b39ddb",
+    "Conformal_TargetOnly": "#1e88e5",
+    "AAPA_Conformal": "#43a047",
+}
+
+SIM_BASELINE = "AAPA"
+SIM_OURS = "Conformal_TargetOnly"
+
+# Metrics that showed no separation between controllers in this simulation -
+# every method lands within ~2ms on latency and within 0.002 on utilisation,
+# so reporting them would imply a difference that is not there.
+SIM_FLAT_METRICS = [
+    "mean_response_time",
+    "p99_response_time",
+    "mean_cpu_utilization",
+    "cold_starts",
+]
+
+
+def simulation_available() -> bool:
+    return SIM_RESULTS.exists()
+
+
+def load_simulation() -> pd.DataFrame:
+    """Per-(workload, autoscaler) rows from the discrete-event simulator."""
+    return pd.read_csv(SIM_RESULTS)
+
+
+def summarise_simulation(sim: pd.DataFrame) -> pd.DataFrame:
+    """Mean per autoscaler, ordered for display, with deltas against AAPA."""
+    present = [c for c in SIM_ORDER if c in set(sim.autoscaler)]
+
+    cols = [
+        "slo_violation_rate",
+        "total_pod_minutes",
+        "scaling_actions",
+        "mean_response_time",
+        "p99_response_time",
+        "mean_cpu_utilization",
+        "cold_starts",
+        "rei_paper_text",
+        "rei_paper_table6",
+        "rei_repo_code",
+    ]
+    cols = [c for c in cols if c in sim.columns]
+    stats = sim.groupby("autoscaler")[cols].mean().loc[present]
+
+    if SIM_BASELINE in stats.index:
+        base = stats.loc[SIM_BASELINE]
+        for col, out in [
+            ("scaling_actions", "churn_vs_base"),
+            ("total_pod_minutes", "pods_vs_base"),
+            ("slo_violation_rate", "slo_vs_base"),
+        ]:
+            if col in stats.columns and base[col]:
+                stats[out] = (stats[col] - base[col]) / base[col] * 100
+
+    stats["label"] = [SIM_LABEL.get(c, c) for c in stats.index]
+    return stats
+
+
+def metric_separation(stats: pd.DataFrame) -> pd.DataFrame:
+    """How much each metric actually differs across controllers.
+
+    A metric whose max/min ratio is near 1 does not distinguish the methods,
+    and presenting it would suggest a difference that the data does not show.
+    """
+    rows = []
+    for col in stats.columns:
+        # Skip labels and the derived "_vs_base" deltas, which straddle zero
+        # and so produce meaningless ratios.
+        if col == "label" or col.endswith("_vs_base") or stats[col].dtype == object:
+            continue
+        lo, hi = stats[col].min(), stats[col].max()
+        ratio = hi / lo if lo > 0 else float("inf")
+        rows.append({
+            "metric": col,
+            "min": lo,
+            "max": hi,
+            "ratio": ratio,
+            "discriminates": bool(ratio > 1.15),
+        })
+    return pd.DataFrame(rows).sort_values("ratio", ascending=False)

@@ -196,3 +196,71 @@ def capacity_ladder(ladder: pd.DataFrame) -> go.Figure:
         **LAYOUT,
     )
     return fig
+
+
+def stability_bar(stats, label_map, color_map) -> go.Figure:
+    """Scaling actions per controller - the operational churn metric.
+
+    Every scaling action terminates and starts pods, so a controller that
+    thrashes is worse to operate even at equal cost and SLO.
+    """
+    fig = go.Figure(go.Bar(
+        x=stats.label,
+        y=stats.scaling_actions,
+        marker_color=[color_map.get(c, "#666") for c in stats.index],
+        marker_line=dict(color="#222", width=1),
+        text=[f"{v:.1f}" for v in stats.scaling_actions],
+        textposition="outside",
+        textfont=dict(size=14),
+        hovertemplate="<b>%{x}</b><br>%{y:.1f} scaling actions<extra></extra>",
+    ))
+    fig.update_layout(
+        title="Scaling actions per workload — lower is more stable",
+        yaxis_title="Scaling actions",
+        showlegend=False,
+        **LAYOUT,
+    )
+    fig.update_yaxes(rangemode="tozero")
+    return fig
+
+
+def three_axis_compare(stats, color_map) -> go.Figure:
+    """Reliability, cost and churn side by side, each normalised to AAPA.
+
+    Normalising lets three different units share one axis; 100% is AAPA on
+    every measure, and lower is better throughout.
+    """
+    from plotly.subplots import make_subplots
+
+    specs = [
+        ("slo_violation_rate", "SLO violations"),
+        ("total_pod_minutes", "Compute (pod-minutes)"),
+        ("scaling_actions", "Scaling actions"),
+    ]
+    fig = make_subplots(rows=1, cols=3, subplot_titles=[s[1] for s in specs])
+
+    for i, (col, _) in enumerate(specs, start=1):
+        base = stats.loc["AAPA", col] if "AAPA" in stats.index else 1.0
+        vals = stats[col] / base * 100 if base else stats[col]
+        fig.add_trace(
+            go.Bar(
+                x=stats.label, y=vals,
+                marker_color=[color_map.get(c, "#666") for c in stats.index],
+                marker_line=dict(color="#222", width=1),
+                text=[f"{v:.0f}%" for v in vals],
+                textposition="outside",
+                showlegend=False,
+                hovertemplate="<b>%{x}</b><br>%{y:.0f}% of AAPA<extra></extra>",
+            ),
+            row=1, col=i,
+        )
+        fig.add_hline(y=100, line_dash="dash", line_color="#888", row=1, col=i)
+
+    fig.update_layout(
+        title="Relative to AAPA (100% = AAPA, lower is better)",
+        template="plotly_white", font=dict(size=12),
+        margin=dict(l=50, r=30, t=80, b=110), height=460,
+    )
+    fig.update_xaxes(tickangle=-35)
+    fig.update_yaxes(title_text="% of AAPA", row=1, col=1)
+    return fig

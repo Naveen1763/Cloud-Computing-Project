@@ -20,8 +20,9 @@ models_gt/
 models_check/
 
 # --- Intermediate experiment runs ---
-# The four result sets the dashboard reads are tracked; these are scratch runs
-# from development and are not referenced anywhere.
+# The result sets the dashboard reads are tracked (the four decision-level
+# runs plus results_sim6 for the stability page); these are scratch runs from
+# development and are not referenced anywhere.
 results/
 results_check/
 results_conformal/
@@ -29,7 +30,6 @@ results_controllers/
 results_demo/
 results_gt/
 results_sim5/
-results_sim6/
 results_smoke/
 
 # --- Python ---
