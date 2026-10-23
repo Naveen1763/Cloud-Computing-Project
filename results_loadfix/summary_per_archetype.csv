@@ -1,0 +1,5 @@
+,provisioned,provisioned,provisioned,provisioned,provisioned,violation,violation,violation,violation,violation
+controller,AAPA_Beta,Conformal_Envelope,Conformal_TargetOnly,Reactive,Top1_NoMargin_control,AAPA_Beta,Conformal_Envelope,Conformal_TargetOnly,Reactive,Top1_NoMargin_control
+archetype_true,,,,,,,,,,
+PERIODIC,10.6868,19.5917,16.5917,7.3707,9.5623,0.0018,0.0004,0.0004,0.0023,0.0018
+STATIONARY_NOISY,654.9612,646.8466,643.8466,276.1497,616.5143,0.002,0.0014,0.0014,0.0052,0.0024

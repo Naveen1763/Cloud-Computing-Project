@@ -1,0 +1,53 @@
+# AAPA Default Configuration
+
+# Autoscaling parameters
+scaling:
+  spike:
+    target_cpu: 0.3
+    cooldown: 1200  # 20 minutes
+    warm_pool_size: 2
+    min_replicas: 2
+    max_replicas: 100
+    
+  periodic:
+    target_cpu: 0.75
+    cooldown: 180  # 3 minutes
+    min_replicas: 1
+    max_replicas: 100
+    prediction_horizon: 900  # 15 minutes
+    
+  ramp:
+    target_cpu: 0.6
+    cooldown: 420  # 7 minutes
+    min_replicas: 1
+    max_replicas: 100
+    trend_window: 10
+    
+  stationary_noisy:
+    target_cpu: 0.55
+    cooldown: 720  # 12 minutes
+    min_replicas: 1
+    max_replicas: 100
+    stability_window: 5
+
+# Simulation parameters
+simulation:
+  pod_startup_time: 30  # seconds
+  metric_interval: 60  # seconds
+  cpu_per_request: 0.001
+  memory_per_pod: 256  # MB
+  
+# Classification parameters
+classification:
+  window_size: 60  # minutes
+  stride: 10  # minutes
+  min_invocations: 1000
+  confidence_threshold: 0.7
+
+# Evaluation parameters
+evaluation:
+  slo_target: 500  # milliseconds
+  rei_weights:
+    slo: 0.5
+    efficiency: 0.3
+    stability: 0.2

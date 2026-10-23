@@ -1,0 +1,6 @@
+controller,slo_violation_rate,mean_shortfall,mean_provisioned,mean_excess_replicas
+AAPA_Beta,0.0056,0.7198,14.8594,9.3232
+Conformal_Envelope,0.0055,0.6349,18.0088,12.4632
+Conformal_TargetOnly,0.0154,0.408,15.1346,9.6158
+Reactive,0.0181,0.6344,8.5007,3.0341
+Top1_NoMargin_control,0.0155,0.4072,12.8815,7.3632

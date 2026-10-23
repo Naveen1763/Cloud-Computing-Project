@@ -1,0 +1,52 @@
+{
+  "accuracy": 0.9642247105712659,
+  "ece_raw_softmax": 0.011651152511376252,
+  "ece_beta_calibrated": 0.016362127599974276,
+  "mean_confidence_raw": 0.9758284114323659,
+  "mean_confidence_beta": 0.980537074649734,
+  "conformal": {
+    "alpha": 0.1,
+    "target_coverage": 0.9,
+    "empirical_coverage": 0.9911273486430062,
+    "avg_set_size": 1.0475896754602392,
+    "singleton_rate": 0.9524103245397608,
+    "set_size_distribution": {
+      "1": 20073,
+      "2": 1003
+    },
+    "n_test": 21076
+  },
+  "conformal_per_class": {
+    "PERIODIC": {
+      "n": 2964,
+      "coverage": 1.0,
+      "avg_set_size": 1.1086369770580298
+    },
+    "SPIKE": {
+      "n": 283,
+      "coverage": 0.8586572438162544,
+      "avg_set_size": 1.3003533568904593
+    },
+    "STATIONARY_NOISY": {
+      "n": 17829,
+      "coverage": 0.9917550058892816,
+      "avg_set_size": 1.033428683605362
+    }
+  },
+  "n_test_windows": 21076,
+  "ambiguous_window_rate": 0.047589675460239136,
+  "args": {
+    "dataset_dir": "dataset",
+    "results_dir": "results_ctrl_ablation",
+    "max_workloads": 200,
+    "min_invocations": 100,
+    "window_size": 60,
+    "stride": 10,
+    "labels": "kswd",
+    "alpha": 0.1,
+    "conformal_method": "aps",
+    "mondrian": true,
+    "calib_fraction": 0.5,
+    "seed": 42
+  }
+}

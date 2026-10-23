@@ -1,0 +1,148 @@
+{
+  "dataset_name": "Kubernetes Serverless Workload Dataset (KSWD)",
+  "version": "1.0.0",
+  "release_date": "2025-01-09",
+  "description": "A comprehensive collection of real-world serverless workload traces formatted for Kubernetes autoscaling research",
+  "source": {
+    "original_dataset": "Azure Functions Trace 2019",
+    "original_authors": "Shahrad et al.",
+    "original_paper": "Serverless in the Wild: Characterizing and Optimizing the Serverless Workload at a Large Cloud Provider",
+    "transformation_paper": "Archetype-Aware Predictive Autoscaling with Uncertainty Quantification for Serverless Workloads on Kubernetes"
+  },
+  "statistics": {
+    "total_workloads": 10148,
+    "duration_per_workload_minutes": 20160,
+    "duration_per_workload_days": 14,
+    "time_granularity_minutes": 1,
+    "total_data_points": 204623680,
+    "archetype_distribution": {
+      "spike": {
+        "count": 2334,
+        "percentage": 23.0
+      },
+      "periodic": {
+        "count": 3146,
+        "percentage": 31.0
+      },
+      "ramp": {
+        "count": 1928,
+        "percentage": 19.0
+      },
+      "stationary_noisy": {
+        "count": 2740,
+        "percentage": 27.0
+      }
+    }
+  },
+  "features": {
+    "time_series_features": [
+      "mean_rps",
+      "variance_rps",
+      "std_dev_rps",
+      "skewness",
+      "kurtosis",
+      "spectral_entropy",
+      "autocorr_lag_60",
+      "autocorr_lag_120",
+      "peak_to_mean_ratio",
+      "num_peaks",
+      "trend_strength",
+      "seasonality_strength"
+    ],
+    "resource_features": [
+      "cpu_millicores_p50",
+      "cpu_millicores_p90",
+      "cpu_millicores_p99",
+      "memory_mb_p50",
+      "memory_mb_p90",
+      "memory_mb_p99"
+    ],
+    "slo_features": [
+      "response_time_ms_p50",
+      "response_time_ms_p90",
+      "response_time_ms_p99"
+    ]
+  },
+  "archetype_definitions": {
+    "spike": {
+      "description": "Workloads with sudden bursts and low baseline activity",
+      "criteria": {
+        "kurtosis": "> 20",
+        "peak_to_mean_ratio": "> 50"
+      }
+    },
+    "periodic": {
+      "description": "Workloads with regular, predictable patterns",
+      "criteria": {
+        "spectral_entropy": "< 0.4",
+        "autocorr_lag_60": "> 0.6"
+      }
+    },
+    "ramp": {
+      "description": "Workloads with gradual increases or decreases",
+      "criteria": {
+        "trend_strength": "> 0.1"
+      }
+    },
+    "stationary_noisy": {
+      "description": "Stable workloads with random noise",
+      "criteria": {
+        "variance": "high",
+        "trend_strength": "< 0.05"
+      }
+    }
+  },
+  "data_schema": {
+    "workload_id": "string: unique identifier for the workload",
+    "archetype": "string: one of [spike, periodic, ramp, stationary_noisy]",
+    "archetype_confidence": "float: confidence score [0, 1]",
+    "duration_minutes": "integer: total duration in minutes",
+    "resource_requirements": {
+      "cpu_millicores": {
+        "p50": "integer: 50th percentile CPU requirement",
+        "p90": "integer: 90th percentile CPU requirement",
+        "p99": "integer: 99th percentile CPU requirement"
+      },
+      "memory_mb": {
+        "p50": "integer: 50th percentile memory requirement",
+        "p90": "integer: 90th percentile memory requirement",
+        "p99": "integer: 99th percentile memory requirement"
+      }
+    },
+    "slo_targets": {
+      "response_time_ms": {
+        "p50": "integer: 50th percentile response time target",
+        "p90": "integer: 90th percentile response time target",
+        "p99": "integer: 99th percentile response time target"
+      }
+    },
+    "request_trace": {
+      "timestamps": "array[string]: ISO 8601 timestamps",
+      "requests_per_minute": "array[integer]: requests in each minute",
+      "requests_per_second": "array[float]: derived requests per second"
+    },
+    "features": "object: computed time series features"
+  },
+  "file_structure": {
+    "workloads": "Individual workload JSON files named w_XXXX.json",
+    "archetypes": "JSON files containing workload IDs grouped by archetype",
+    "examples": "Python scripts demonstrating dataset usage",
+    "tools": "Scripts for dataset generation and processing"
+  },
+  "usage": {
+    "loading": "See examples/load_workload.py",
+    "visualization": "See examples/visualize_traces.py",
+    "k8s_integration": "See examples/generate_k8s_hpa.py"
+  },
+  "limitations": [
+    "1-minute temporal resolution from original data",
+    "Resource requirements are estimated, not directly measured",
+    "Data from 2019 may not reflect current workload patterns",
+    "Primarily represents event-driven serverless functions"
+  ],
+  "license": "MIT",
+  "contact": {
+    "repository": "https://github.com/GuilinDev/aapa-simulator",
+    "issues": "https://github.com/GuilinDev/aapa-simulator/issues"
+  }
+}

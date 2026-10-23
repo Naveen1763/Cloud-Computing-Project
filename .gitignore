@@ -1,0 +1,64 @@
+# --- Virtual environment (1.2 GB) ---
+venv/
+.venv/
+env/
+ENV/
+
+# --- Dataset traces (8.7 GB) ---
+# The schema, archetype groupings, tools and examples are tracked; only the
+# bulk trace files are excluded. See the Data section of README.md.
+dataset/workloads/
+
+# Raw Azure Functions CSVs, if downloaded
+data/raw/
+data/processed/
+
+# --- Regenerable model artifacts ---
+# Rebuilt in ~2 minutes by examples/run_classification.py
+models/
+models_gt/
+models_check/
+
+# --- Intermediate experiment runs ---
+# The four result sets the dashboard reads are tracked; these are scratch runs
+# from development and are not referenced anywhere.
+results/
+results_check/
+results_conformal/
+results_controllers/
+results_demo/
+results_gt/
+results_sim5/
+results_sim6/
+results_smoke/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# --- Notebooks ---
+.ipynb_checkpoints/
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Logs ---
+logs/
+*.log

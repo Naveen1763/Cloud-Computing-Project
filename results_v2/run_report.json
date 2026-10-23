@@ -1,0 +1,56 @@
+{
+  "accuracy": 0.8785359315882485,
+  "ece_raw_softmax": 0.03973099308564948,
+  "ece_beta_calibrated": 0.15416844391077078,
+  "mean_confidence_raw": 0.8829905888433537,
+  "mean_confidence_beta": 0.9152505229143297,
+  "conformal": {
+    "alpha": 0.1,
+    "target_coverage": 0.9,
+    "empirical_coverage": 0.9241753940673443,
+    "avg_set_size": 1.218934209433895,
+    "singleton_rate": 0.781919751402512,
+    "set_size_distribution": {
+      "1": 65926,
+      "2": 18315,
+      "3": 72
+    },
+    "n_test": 84313
+  },
+  "conformal_per_class": {
+    "PERIODIC": {
+      "n": 31600,
+      "coverage": 0.9986392405063291,
+      "avg_set_size": 1.064746835443038
+    },
+    "SPIKE": {
+      "n": 20537,
+      "coverage": 0.8838194478258753,
+      "avg_set_size": 1.733018454496762
+    },
+    "STATIONARY_NOISY": {
+      "n": 32176,
+      "coverage": 0.8768025857782198,
+      "avg_set_size": 1.0422364495275982
+    }
+  },
+  "n_test_windows": 84313,
+  "ambiguous_window_rate": 0.21808024859748792,
+  "args": {
+    "dataset_dir": "dataset",
+    "results_dir": "results_v2",
+    "max_workloads": 200,
+    "min_invocations": 100,
+    "window_size": 60,
+    "stride": 10,
+    "labels": "kswd",
+    "alpha": 0.1,
+    "conformal_method": "aps",
+    "mondrian": true,
+    "calib_fraction": 0.5,
+    "min_activity": 0.0,
+    "load_multiplier": 300.0,
+    "split": "workload",
+    "seed": 42
+  }
+}

@@ -1,0 +1,39 @@
+# Core dependencies
+numpy>=1.21.0
+pandas>=1.3.0
+scikit-learn>=1.0.0
+lightgbm>=3.3.0
+simpy>=4.0.0
+
+# Feature extraction
+tsfresh>=0.18.0
+statsmodels>=0.13.0
+scipy>=1.7.0
+
+# Visualization
+matplotlib>=3.4.0
+seaborn>=0.11.0
+plotly>=5.0.0
+
+# Utilities
+tqdm>=4.62.0
+pyyaml>=5.4.0
+joblib>=1.0.0
+
+# Development dependencies
+pytest>=6.2.0
+pytest-cov>=2.12.0
+black>=21.0
+flake8>=3.9.0
+jupyter>=1.0.0
+notebook>=6.4.0
+
+# Optional: For parallel processing
+dask>=2021.8.0
+ray>=1.6.0
+
+# Optional: reference conformal implementation, used only by
+# examples/validate_conformal_mapie.py to cross-check src/models/conformal.py.
+# Not needed at runtime - the autoscaler uses the in-repo predictor, which
+# additionally supports Mondrian (class-conditional) calibration.
+mapie>=1.0.0

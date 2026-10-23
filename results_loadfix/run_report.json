@@ -1,0 +1,50 @@
+{
+  "accuracy": 0.907222278894216,
+  "ece_raw_softmax": 0.07692718740141036,
+  "ece_beta_calibrated": 0.0972601102333549,
+  "mean_confidence_raw": 0.9237020326715623,
+  "mean_confidence_beta": 0.9686001688194144,
+  "conformal": {
+    "alpha": 0.1,
+    "target_coverage": 0.9,
+    "empirical_coverage": 0.939023768234214,
+    "avg_set_size": 2.0206569417525246,
+    "singleton_rate": 0.01433234724064062,
+    "set_size_distribution": {
+      "1": 562,
+      "2": 37278,
+      "3": 1372
+    },
+    "n_test": 39212
+  },
+  "conformal_per_class": {
+    "PERIODIC": {
+      "n": 7036,
+      "coverage": 0.7387720295622513,
+      "avg_set_size": 2.1920125071063103
+    },
+    "STATIONARY_NOISY": {
+      "n": 32176,
+      "coverage": 0.9828132769766286,
+      "avg_set_size": 1.9831862257583293
+    }
+  },
+  "n_test_windows": 39212,
+  "ambiguous_window_rate": 0.9856676527593594,
+  "args": {
+    "dataset_dir": "dataset",
+    "results_dir": "results_loadfix",
+    "max_workloads": 200,
+    "min_invocations": 100,
+    "window_size": 60,
+    "stride": 10,
+    "labels": "kswd",
+    "alpha": 0.1,
+    "conformal_method": "aps",
+    "mondrian": true,
+    "calib_fraction": 0.5,
+    "load_multiplier": 60.0,
+    "split": "workload",
+    "seed": 42
+  }
+}
