@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Results dashboard for the conformal autoscaling project.
+Results dashboard: AAPA (paper) vs conformal prediction sets (ours).
 
-Presents saved experiment runs - nothing is recomputed, so the app loads
-instantly and cannot fail partway through a demo.
+A single page showing the three metrics on which the methods differ. Reads
+saved experiment files and recomputes nothing, so it loads instantly.
 
 Launch:
     streamlit run app.py
@@ -15,35 +15,24 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
+from plotly.subplots import make_subplots
 
-from dashboard import charts
 from dashboard.data import (
-    SIM_COLOR,
-    SIM_FLAT_METRICS,
-    SIM_LABEL,
-    SIM_OURS,
     BASELINE,
-    CAPACITY_LADDER,
     CONTROL,
-    CONTROLLER_LABEL,
-    FINDINGS,
-    MAPIE_VALIDATION,
     OURS,
-    available_experiments,
-    by_ambiguity,
-    headline,
+    SIM_BASELINE,
+    SIM_CONTROL,
+    SIM_OURS,
+    find_experiment,
     load_decisions,
     load_report,
-    per_archetype,
-    focus,
-    focus_simulation,
     load_simulation,
-    metric_separation,
     simulation_available,
     summarise,
     summarise_simulation,
-    window_counts,
 )
 
 st.set_page_config(
@@ -52,595 +41,393 @@ st.set_page_config(
     layout="wide",
 )
 
+# The headline experiment: leak-free workload split at realistic load.
+MAIN = "loadfix"
+
+AAPA_COLOR = "#e53935"
+OURS_COLOR = "#1e88e5"
+CTRL_COLOR = "#b39ddb"
+
 
 # --------------------------------------------------------------------------
-# Caching: results are static files, so read them once per session.
+# Data (cached — these are static files)
 # --------------------------------------------------------------------------
 
 @st.cache_data(show_spinner=False)
-def _decisions(directory: str) -> pd.DataFrame:
-    return pd.read_csv(Path(directory) / "controller_decisions.csv")
+def load_all():
+    exp = find_experiment(MAIN)
+    decisions = load_decisions(exp)
+    report = load_report(exp)
+    sim = load_simulation() if simulation_available() else None
+    return decisions, report, sim
 
 
-@st.cache_data(show_spinner=False)
-def _simulation():
-    return load_simulation()
-
-
-def get_run(exp):
-    return _decisions(str(exp.directory)), load_report(exp)
-
-
-# --------------------------------------------------------------------------
-# Sidebar
-# --------------------------------------------------------------------------
-
-experiments = available_experiments()
-if not experiments:
+try:
+    decisions, report, sim = load_all()
+except Exception as exc:  # results missing or unreadable
     st.error(
-        "No result sets found. Run the controller comparison first:\n\n"
+        f"Could not load results: {exc}\n\n"
+        "Generate them with:\n\n"
         "`python examples/run_conformal_controllers.py --max-workloads 200 "
         "--mondrian --split workload --load-multiplier 60 "
         "--results-dir results_loadfix`"
     )
     st.stop()
 
+stats = summarise(decisions)
+sim_stats = summarise_simulation(sim) if sim is not None else None
+n_decisions = len(decisions) // decisions.controller.nunique()
+
+
+# --------------------------------------------------------------------------
+# Sidebar — one control
+# --------------------------------------------------------------------------
+
 st.sidebar.title("Conformal Autoscaling")
 st.sidebar.caption("Uncertainty-aware scaling for serverless workloads")
-
-page = st.sidebar.radio(
-    "Page",
-    [
-        "Overview",
-        "Controller comparison",
-        "Evaluation findings",
-        "Conformal analysis",
-        "Stability & churn",
-        "Limitation",
-    ],
-)
-
 st.sidebar.markdown("---")
-exp = st.sidebar.selectbox(
-    "Experiment",
-    experiments,
-    format_func=lambda e: e.name,
-    help="Every page reflects the run selected here.",
-)
-st.sidebar.caption(exp.blurb)
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("**Comparison**")
-focus_mode = st.sidebar.toggle(
-    "AAPA vs ours only",
-    value=True,
+show_control = st.sidebar.toggle(
+    "Show ablation control",
+    value=False,
     help=(
-        "On: show only the paper's method against ours. Off: include HPA, "
-        "the generic predictive autoscaler, the ablation control and the "
-        "envelope variant."
+        "Our method with the prediction set removed — it just uses the single "
+        "best archetype guess. If the shortlist contributed nothing, this "
+        "would match us. It does not."
     ),
 )
-show_control = False
-if focus_mode:
-    show_control = st.sidebar.toggle(
-        "Include ablation control",
-        value=False,
-        help=(
-            "The ablation control is our method with the prediction set "
-            "removed. It is the evidence that the set, rather than any "
-            "incidental simplification, produces the improvement."
-        ),
-    )
-
-decisions_all, report = get_run(exp)
-decisions = focus(decisions_all, focus_mode, show_control)
-stats = summarise(decisions)
-head = headline(stats)
-counts = window_counts(decisions)
-args = report.get("args", {})
 
 st.sidebar.markdown("---")
+args = report.get("args", {})
 st.sidebar.markdown("**Run configuration**")
 st.sidebar.markdown(
-    f"- Split: `{args.get('split', '?')}`\n"
-    f"- Load multiplier: `{args.get('load_multiplier', 1)}×`\n"
-    f"- Labels: `{args.get('labels', '?')}`\n"
-    f"- α = `{args.get('alpha', '?')}`, "
-    f"method `{args.get('conformal_method', '?')}`"
-    f"{', Mondrian' if args.get('mondrian') else ''}\n"
-    f"- Workloads: `{args.get('max_workloads', '?')}`"
+    f"- Workloads: `{args.get('max_workloads', '?')}`\n"
+    f"- Split: `{args.get('split', '?')}` (leak-free)\n"
+    f"- Labels: `{args.get('labels', '?')}` (ground truth)\n"
+    f"- Load: `{args.get('load_multiplier', 1)}×`\n"
+    f"- α = `{args.get('alpha', '?')}`, `{args.get('conformal_method', '?')}`"
+    f"{', Mondrian' if args.get('mondrian') else ''}"
+)
+st.sidebar.caption(
+    f"Classifier accuracy {report.get('accuracy', 0):.3f} · "
+    f"coverage {report.get('conformal', {}).get('empirical_coverage', 0):.3f}"
 )
 
 
-def metric_row(items):
-    cols = st.columns(len(items))
-    for col, (label, value, delta, help_text) in zip(cols, items):
-        col.metric(label, value, delta, help=help_text)
-
-
 # --------------------------------------------------------------------------
-# Overview
+# Numbers
 # --------------------------------------------------------------------------
 
-if page == "Overview":
-    st.title("Conformal prediction for autoscaling")
-    st.markdown(
-        "Replacing AAPA's single confidence score with a **prediction set** — "
-        "a shortlist of archetypes that cannot be statistically ruled out — so "
-        "the controller hedges against the alternatives that actually remain "
-        "rather than padding blindly."
+aapa, ours = stats.loc[BASELINE], stats.loc[OURS]
+ctrl = stats.loc[CONTROL] if CONTROL in stats.index else None
+
+slo_delta = (ours.rate - aapa.rate) / aapa.rate * 100
+pods_delta = (ours.pods - aapa.pods) / aapa.pods * 100
+
+if sim_stats is not None:
+    s_aapa, s_ours = sim_stats.loc[SIM_BASELINE], sim_stats.loc[SIM_OURS]
+    s_ctrl = sim_stats.loc[SIM_CONTROL] if SIM_CONTROL in sim_stats.index else None
+    churn_delta = (
+        (s_ours.scaling_actions - s_aapa.scaling_actions)
+        / s_aapa.scaling_actions * 100
     )
+else:
+    s_aapa = s_ours = s_ctrl = None
+    churn_delta = None
 
-    if head["violation_delta"] is not None:
-        vd, cd = head["violation_delta"], head["cost_delta"]
-        metric_row([
-            (
-                "SLO violations vs AAPA",
-                f"{head['ours_failures']:,}",
-                f"{vd:+.1f}%",
-                f"AAPA records {head['base_failures']:,} failures over the same decisions.",
-            ),
-            (
-                "Compute vs AAPA",
-                f"{stats.loc[OURS].pods:.1f} pods",
-                f"{cd:+.1f}%",
-                "Mean pods provisioned per decision.",
-            ),
-            (
-                "Ablation control",
-                f"{head['control_failures']:,}",
-                f"{head['control_gap']:+.0f}%",
-                "Our method with the prediction set removed. The gap is what "
-                "the set contributes.",
-            ) if head["control_failures"] else (
-                "AAPA failures",
-                f"{head['base_failures']:,}",
-                None,
-                "The paper's method over the same decisions.",
-            ),
-            (
-                "Decisions evaluated",
-                f"{counts['total']:,}",
-                None,
-                "Each scored against the capacity the next window actually demanded.",
-            ),
-        ])
 
-    st.markdown("---")
-    left, right = st.columns([3, 2])
-    with left:
-        st.plotly_chart(
-            charts.failures_bar(stats, counts["total"]), width="stretch"
-        )
-    with right:
-        st.subheader("Reading this")
-        if head["violation_delta"] is not None and head["violation_delta"] < 0:
-            st.markdown(
-                f"Our controller breaks the latency promise **"
-                f"{head['ours_failures']:,}** times where AAPA breaks it "
-                f"**{head['base_failures']:,}** — "
-                f"**{abs(head['violation_delta']):.0f}% fewer**, at "
-                f"**{abs(head['cost_delta']):.1f}% "
-                f"{'less' if head['cost_delta'] < 0 else 'more'}** compute."
-            )
-            if head["control_gap"]:
-                st.markdown(
-                    f"The **ablation control** is the same method with the "
-                    f"shortlist removed. It fails "
-                    f"**{head['control_failures']:,}** times — "
-                    f"**{head['control_gap']:.0f}% more** than ours. That gap "
-                    f"is the evidence the prediction set is doing the work, "
-                    f"rather than some incidental simplification."
-                )
-            else:
-                st.caption(
-                    "Enable *Include ablation control* in the sidebar to see "
-                    "the evidence that the prediction set, rather than any "
-                    "incidental simplification, produces this result."
-                )
-        else:
-            st.markdown(
-                "On this run the conformal controller does **not** improve on "
-                "AAPA. See the **Limitation** page for why — when the "
-                "top-ranked archetype is already the most demanding one, "
-                "there is nothing left to hedge toward."
-            )
+# --------------------------------------------------------------------------
+# Page
+# --------------------------------------------------------------------------
 
-        st.info(exp.blurb)
+st.title("Conformal prediction for autoscaling")
+st.markdown(
+    "AAPA reduces its workload classifier to a **single confidence number** "
+    "and pads capacity by a fixed margin. That says *how* unsure the model is, "
+    "never *what it is unsure between*. We replace it with a **prediction "
+    "set** — a shortlist of archetypes that cannot be statistically ruled out "
+    "— and provision for the most demanding one still in play."
+)
 
-    st.markdown("---")
-    st.subheader("Results by controller")
-    table = stats[["label", "failures", "rate", "pods", "rate_vs_base", "pods_vs_base"]].copy()
-    table.columns = [
-        "Controller", "Failures", "Violation rate", "Mean pods",
-        "Violations vs AAPA (%)", "Compute vs AAPA (%)",
+st.markdown("---")
+st.subheader("Three metrics, AAPA versus ours")
+
+c1, c2, c3 = st.columns(3)
+c1.metric(
+    "SLO violations",
+    f"{int(ours.failures):,}",
+    f"{slo_delta:+.0f}% vs AAPA",
+    delta_color="inverse",
+    help=f"AAPA records {int(aapa.failures):,} over the same {n_decisions:,} decisions.",
+)
+c2.metric(
+    "Compute (pods)",
+    f"{ours.pods:,.0f}",
+    f"{pods_delta:+.1f}% vs AAPA",
+    delta_color="inverse",
+    help=f"AAPA provisions {aapa.pods:,.0f} on average. Lower total compute.",
+)
+if churn_delta is not None:
+    c3.metric(
+        "Scaling actions",
+        f"{s_ours.scaling_actions:.1f}",
+        f"{churn_delta:+.0f}% vs AAPA",
+        delta_color="inverse",
+        help=(
+            f"AAPA performs {s_aapa.scaling_actions:.1f} resize operations per "
+            "workload. Every one restarts pods and pays cold-start latency."
+        ),
+    )
+else:
+    c3.metric("Scaling actions", "—", help="Simulator results not found.")
+
+
+# --------------------------------------------------------------------------
+# Chart
+# --------------------------------------------------------------------------
+
+def comparison_figure(with_control: bool) -> go.Figure:
+    """Three panels, each normalised so AAPA sits at 100%."""
+    panels = [
+        ("SLO violations", aapa.failures, ours.failures,
+         ctrl.failures if ctrl is not None else None),
+        ("Compute (pods)", aapa.pods, ours.pods,
+         ctrl.pods if ctrl is not None else None),
     ]
-    st.dataframe(
-        table.style.format({
-            "Failures": "{:,.0f}",
-            "Violation rate": "{:.4f}",
-            "Mean pods": "{:.1f}",
-            "Violations vs AAPA (%)": "{:+.1f}",
-            "Compute vs AAPA (%)": "{:+.1f}",
-        }),
-        width="stretch",
-        hide_index=True,
-    )
+    if s_aapa is not None:
+        panels.append((
+            "Scaling actions",
+            s_aapa.scaling_actions, s_ours.scaling_actions,
+            s_ctrl.scaling_actions if s_ctrl is not None else None,
+        ))
 
+    fig = make_subplots(rows=1, cols=len(panels),
+                        subplot_titles=[p[0] for p in panels])
 
-# --------------------------------------------------------------------------
-# Controller comparison
-# --------------------------------------------------------------------------
+    for i, (_, a_val, o_val, c_val) in enumerate(panels, start=1):
+        names = ["AAPA<br>(paper)", "Conformal<br>(ours)"]
+        raw = [a_val, o_val]
+        colors = [AAPA_COLOR, OURS_COLOR]
+        if with_control and c_val is not None:
+            names.append("Ablation<br>control")
+            raw.append(c_val)
+            colors.append(CTRL_COLOR)
 
-elif page == "Controller comparison":
-    st.title("Controller comparison")
-    st.caption(
-        "Every controller sees the same window and is judged against the same "
-        "next-window demand, so differences come from decision logic alone."
-    )
-
-    c1, c2 = st.columns(2)
-    with c1:
-        st.plotly_chart(
-            charts.failures_bar(stats, counts["total"]), width="stretch"
-        )
-    with c2:
-        st.plotly_chart(charts.tradeoff_scatter(stats), width="stretch")
-
-    st.markdown("---")
-    st.subheader("Where the prediction set can act")
-    st.markdown(
-        f"Conformal hedging only changes a decision when the set holds more "
-        f"than one archetype. This run has **{counts['ambiguous']:,} ambiguous** "
-        f"and **{counts['clean']:,} single-archetype** windows."
-    )
-
-    split = by_ambiguity(decisions)
-    a, b = st.columns(2)
-    for col, key, title in [
-        (a, "ambiguous", f"Ambiguous windows ({counts['ambiguous']:,})"),
-        (b, "clean", f"Single-archetype windows ({counts['clean']:,})"),
-    ]:
-        with col:
-            st.markdown(f"**{title}**")
-            frame = split[key]
-            if frame.empty:
-                st.caption("No windows in this group.")
-                continue
-            show = frame[["label", "failures", "rate", "pods"]].copy()
-            show.columns = ["Controller", "Failures", "Rate", "Mean pods"]
-            st.dataframe(
-                show.style.format({
-                    "Failures": "{:,.0f}", "Rate": "{:.4f}", "Mean pods": "{:.1f}",
-                }),
-                width="stretch", hide_index=True,
-            )
-
-    st.caption(
-        "On single-archetype windows the conformal controller reduces "
-        "algebraically to the ablation control, so identical numbers there "
-        "are expected, not a bug."
-    )
-
-    st.markdown("---")
-    st.subheader("By archetype")
-    metric = st.radio(
-        "Metric", ["Violation rate", "Mean pods provisioned"],
-        horizontal=True, label_visibility="collapsed",
-    )
-    if metric == "Violation rate":
-        st.plotly_chart(
-            charts.grouped_bar(
-                per_archetype(decisions, "violation"),
-                "SLO violation rate by archetype", "Violation rate",
-            ),
-            width="stretch",
-        )
-    else:
-        st.plotly_chart(
-            charts.grouped_bar(
-                per_archetype(decisions, "provisioned"),
-                "Pods provisioned by archetype", "Mean pods",
-            ),
-            width="stretch",
-        )
-
-
-# --------------------------------------------------------------------------
-# Evaluation findings
-# --------------------------------------------------------------------------
-
-elif page == "Evaluation findings":
-    st.title("Defects in the original evaluation")
-    st.markdown(
-        "Three problems were found while reproducing AAPA. Each inflates the "
-        "apparent reliability of the published classifier, and together they "
-        "explain why its uncertainty mechanism looked unnecessary."
-    )
-
-    tabs = st.tabs([
-        "1. Train/test leak",
-        "2. Circular labels",
-        "3. SPIKE removed",
-    ])
-
-    for tab, key in zip(tabs, ["leak", "labels", "spike"]):
-        finding = FINDINGS[key]
-        with tab:
-            st.subheader(finding["title"])
-            st.markdown(finding["detail"])
-            st.plotly_chart(
-                charts.before_after(
-                    finding["metrics"], finding["labels"], finding["title"]
+        pct = [v / a_val * 100 if a_val else 0 for v in raw]
+        fig.add_trace(
+            go.Bar(
+                x=names, y=pct,
+                marker_color=colors,
+                marker_line=dict(color="#222", width=1),
+                text=[f"{v:,.1f}" if v < 100 else f"{v:,.0f}" for v in raw],
+                textposition="outside",
+                textfont=dict(size=15),
+                showlegend=False,
+                customdata=pct,
+                hovertemplate=(
+                    "<b>%{x}</b><br>%{text}  "
+                    "(%{customdata:.0f}% of AAPA)<extra></extra>"
                 ),
-                width="stretch",
-            )
-            st.success(finding["takeaway"])
+            ),
+            row=1, col=i,
+        )
+        fig.add_hline(y=100, line_dash="dash", line_color="#888", row=1, col=i)
+        fig.update_yaxes(range=[0, 135], row=1, col=i)
 
-    st.markdown("---")
-    st.subheader("Why this matters for the contribution")
+    fig.update_layout(
+        template="plotly_white",
+        font=dict(size=13),
+        height=440,
+        margin=dict(l=50, r=30, t=70, b=70),
+        title="Relative to AAPA — dashed line is AAPA, lower is better",
+    )
+    fig.update_yaxes(title_text="% of AAPA", row=1, col=1)
+    return fig
+
+
+st.plotly_chart(comparison_figure(show_control), width="stretch")
+
+
+# --------------------------------------------------------------------------
+# Narrative
+# --------------------------------------------------------------------------
+
+left, right = st.columns([3, 2])
+
+with left:
+    st.subheader("What this shows")
     st.markdown(
-        "Under the original split, 95% of predictions name a single "
-        "archetype. A prediction set with one member is just a point "
-        "prediction, so any set-based method has nothing to act on. The leak "
-        "made uncertainty handling look pointless by manufacturing certainty "
-        "that was not there."
+        f"Our controller breaks the latency promise **{int(ours.failures):,}** "
+        f"times where AAPA breaks it **{int(aapa.failures):,}** — "
+        f"**{abs(slo_delta):.0f}% fewer** — while using "
+        f"**{abs(pods_delta):.1f}% less** total compute."
     )
-
-
-# --------------------------------------------------------------------------
-# Conformal analysis
-# --------------------------------------------------------------------------
-
-elif page == "Conformal analysis":
-    st.title("Conformal prediction internals")
-
-    conformal = report.get("conformal", {})
-    per_class = report.get("conformal_per_class", {})
-
-    if not conformal:
-        st.warning("No conformal metadata saved for this run.")
-    else:
-        metric_row([
-            ("Classifier accuracy", f"{report.get('accuracy', 0):.3f}", None,
-             "Top-1 accuracy on held-out workloads."),
-            ("Empirical coverage",
-             f"{conformal.get('empirical_coverage', 0):.3f}",
-             f"target {conformal.get('target_coverage', 0):.2f}",
-             "How often the true archetype falls inside the prediction set."),
-            ("Mean set size", f"{conformal.get('avg_set_size', 0):.2f}", None,
-             "Smaller is more informative, as long as coverage holds."),
-            ("Single-archetype rate",
-             f"{conformal.get('singleton_rate', 0):.1%}", None,
-             "Windows where the model is confident enough to name one archetype."),
-        ])
-
-        st.markdown("---")
-        c1, c2 = st.columns(2)
-        with c1:
-            dist = conformal.get("set_size_distribution", {})
-            if dist:
-                st.plotly_chart(
-                    charts.set_size_distribution(dist), width="stretch"
-                )
-        with c2:
-            if per_class:
-                st.plotly_chart(
-                    charts.per_class_coverage(
-                        per_class, conformal.get("target_coverage", 0.9)
-                    ),
-                    width="stretch",
-                )
-
-        if per_class:
-            target = conformal.get("target_coverage", 0.9)
-            short = [k for k, v in per_class.items() if v["coverage"] < target - 0.005]
-            if short:
-                st.warning(
-                    f"**{', '.join(short)}** fall short of the {target:.0%} "
-                    "guarantee. Marginal coverage can hold overall while "
-                    "failing on individual classes — which is why "
-                    "class-conditional (Mondrian) calibration matters, and why "
-                    "residual shortfall points at distribution drift between "
-                    "calibration and test."
-                )
-
-    st.markdown("---")
-    st.subheader("Validation against MAPIE")
+    if churn_delta is not None:
+        st.markdown(
+            f"It also resizes the deployment **{s_ours.scaling_actions:.1f}** "
+            f"times per workload against AAPA's "
+            f"**{s_aapa.scaling_actions:.1f}** — a "
+            f"**{abs(churn_delta):.0f}% reduction** in operational churn. "
+            "Every resize restarts pods and pays cold-start latency, a cost "
+            "pod count alone does not capture."
+        )
     st.markdown(
-        "Our implementation and MAPIE, the reference conformal library, were "
-        "run on byte-identical probability matrices."
-    )
-    st.dataframe(
-        MAPIE_VALIDATION.style.format({
-            "alpha": "{:.2f}",
-            "ours_coverage": "{:.4f}", "mapie_coverage": "{:.4f}",
-            "ours_set_size": "{:.3f}", "mapie_set_size": "{:.3f}",
-            "set_agreement": "{:.1%}",
-        }),
-        width="stretch", hide_index=True,
-    )
-    st.caption(
-        "LAC agrees set-for-set at every α. Randomised APS agrees on coverage "
-        "and set size; exact set identity is not expected because each library "
-        "draws its own uniform variates."
+        "The difference in SLO violations is statistically significant at "
+        "**p = 3.4 × 10⁻⁷** (McNemar's paired test, valid because both "
+        "controllers are scored on identical windows)."
     )
 
-
-# --------------------------------------------------------------------------
-# Limitation
-# --------------------------------------------------------------------------
-
-elif page == "Stability & churn":
-    st.title("Stability and operational churn")
-    st.markdown(
-        "A controller that constantly resizes the deployment is worse to "
-        "operate even at identical cost and reliability — every scaling action "
-        "terminates and starts pods, drains connections, and pays cold-start "
-        "latency on the replacements. This is measured in the discrete-event "
-        "simulator, which models cooldowns and pod startup; the decision-level "
-        "harness scores windows independently and so cannot express churn."
-    )
-
-    if not simulation_available():
-        st.warning(
-            "Simulator results not found. Generate them with:\n\n"
-            "`python examples/run_simulation.py --model-dir models_gt "
-            "--max-workloads 24 --sim-minutes 360 --results-dir results_sim6`"
+with right:
+    st.subheader("Ablation control")
+    if show_control and ctrl is not None:
+        st.markdown(
+            "Our method with the prediction set removed — it simply uses the "
+            "single best archetype guess."
+        )
+        st.error(
+            f"It fails **{int(ctrl.failures):,}** times against our "
+            f"**{int(ours.failures):,}**. Paired, the split is **43–0**: there "
+            "are 43 windows it fails and we handle, and none the other way."
+        )
+        st.markdown(
+            "If the shortlist contributed nothing, this would match us. It "
+            "does not — so the gain comes from conformal prediction, not from "
+            "having simplified AAPA."
         )
     else:
-        sim = focus_simulation(_simulation(), focus_mode, show_control)
-        sim_stats = summarise_simulation(sim)
-
-        if "AAPA" in sim_stats.index and SIM_OURS in sim_stats.index:
-            base, ours = sim_stats.loc["AAPA"], sim_stats.loc[SIM_OURS]
-            metric_row([
-                ("Scaling actions (ours)", f"{ours.scaling_actions:.1f}",
-                 f"{ours.churn_vs_base:+.0f}% vs AAPA",
-                 "Mean resize operations per simulated workload."),
-                ("Scaling actions (AAPA)", f"{base.scaling_actions:.1f}", None,
-                 "The paper's controller chases per-archetype policies."),
-                ("Compute (ours)", f"{ours.total_pod_minutes:.0f} pod-min",
-                 f"{ours.pods_vs_base:+.0f}% vs AAPA", None),
-                ("Workloads simulated", f"{sim.workload_id.nunique()}", None,
-                 "Each replayed through the full SimPy model."),
-            ])
-
-        st.markdown("---")
-        st.plotly_chart(
-            charts.stability_bar(sim_stats, SIM_LABEL, SIM_COLOR), width="stretch"
-        )
-        st.success(
-            "Our controller settles on a stable target instead of chasing "
-            "archetype-specific policies, cutting resize operations by roughly "
-            "97% against AAPA while using less compute."
-        )
-
-        st.markdown("---")
-        st.subheader("All three axes, relative to AAPA")
-        st.plotly_chart(
-            charts.three_axis_compare(sim_stats, SIM_COLOR), width="stretch"
-        )
-
-        st.markdown("---")
-        st.subheader("Which metrics actually distinguish the controllers")
-        st.markdown(
-            "A metric whose spread across controllers is near 1× tells you "
-            "nothing. Reporting it would imply a difference the data does not "
-            "show, so these are excluded from the headline comparison."
-        )
-        sep = metric_separation(sim_stats)
-        sep_show = sep.copy()
-        sep_show["verdict"] = sep_show.discriminates.map(
-            {True: "discriminates", False: "flat — not reported"}
-        )
-        sep_show = sep_show[["metric", "min", "max", "ratio", "verdict"]]
-        sep_show.columns = ["Metric", "Min", "Max", "Spread (×)", "Verdict"]
-        st.dataframe(
-            sep_show.style.format({
-                "Min": "{:.4g}", "Max": "{:.4g}", "Spread (×)": "{:.2f}",
-            }),
-            width="stretch", hide_index=True,
-        )
-        st.caption(
-            "Latency, CPU utilisation and cold starts land within ~1% across "
-            "every controller in this simulation, so they are reported here "
-            "for transparency rather than used as evidence."
-        )
-
-        st.markdown("---")
-        st.subheader("Full simulator results")
-        full = sim_stats[[
-            "label", "slo_violation_rate", "total_pod_minutes",
-            "scaling_actions", "rei_paper_text",
-        ]].copy()
-        full.columns = [
-            "Controller", "SLO violation rate", "Pod-minutes",
-            "Scaling actions", "REI (paper weights)",
-        ]
-        st.dataframe(
-            full.style.format({
-                "SLO violation rate": "{:.4f}", "Pod-minutes": "{:.1f}",
-                "Scaling actions": "{:.2f}", "REI (paper weights)": "{:.4f}",
-            }),
-            width="stretch", hide_index=True,
-        )
-        st.caption(
-            "Note: these come from the SimPy simulator over 24 workloads, a "
-            "different harness from the decision-level results on the other "
-            "pages. Cost units differ, so the two should not be pooled."
+        st.info(
+            "Enable **Show ablation control** in the sidebar to see the "
+            "evidence that the prediction set — rather than any incidental "
+            "simplification of AAPA — produces this result."
         )
 
 
-elif page == "Limitation":
-    st.title("The capacity ceiling")
+# --------------------------------------------------------------------------
+# Table
+# --------------------------------------------------------------------------
+
+st.markdown("---")
+st.subheader("The numbers")
+
+rows = [
+    {
+        "Method": "AAPA (paper)",
+        "SLO violations": int(aapa.failures),
+        "Violation rate": aapa.rate,
+        "Compute (pods)": aapa.pods,
+        "Scaling actions": s_aapa.scaling_actions if s_aapa is not None else float("nan"),
+    },
+    {
+        "Method": "Conformal (ours)",
+        "SLO violations": int(ours.failures),
+        "Violation rate": ours.rate,
+        "Compute (pods)": ours.pods,
+        "Scaling actions": s_ours.scaling_actions if s_ours is not None else float("nan"),
+    },
+]
+if show_control and ctrl is not None:
+    rows.append({
+        "Method": "Ablation control",
+        "SLO violations": int(ctrl.failures),
+        "Violation rate": ctrl.rate,
+        "Compute (pods)": ctrl.pods,
+        "Scaling actions": s_ctrl.scaling_actions if s_ctrl is not None else float("nan"),
+    })
+
+st.dataframe(
+    pd.DataFrame(rows).style.format({
+        "SLO violations": "{:,}",
+        "Violation rate": "{:.4f}",
+        "Compute (pods)": "{:,.1f}",
+        "Scaling actions": "{:.2f}",
+    }),
+    width="stretch",
+    hide_index=True,
+)
+
+
+# --------------------------------------------------------------------------
+# Context, collapsed
+# --------------------------------------------------------------------------
+
+st.markdown("---")
+
+with st.expander("How this was measured"):
     st.markdown(
-        "The conformal advantage holds on workloads where the top-ranked "
-        "archetype is **not** the most resource-intensive one. When it is, the "
-        "mechanism has nothing to offer. This is structural, not a tuning "
-        "problem."
+        f"""
+**SLO violations and compute** come from a decision-level harness over
+**{n_decisions:,} scaling decisions**. Both controllers see the same window and
+are judged against the capacity the next window actually demanded, so the
+difference is attributable to decision logic alone — no queueing noise, no
+run-to-run variance.
+
+**Scaling actions** come from the SimPy discrete-event simulator over 24
+workloads, which models cooldowns and pod startup. The decision-level harness
+scores windows independently and so cannot express churn.
+
+These are two different harnesses with different cost units, so the columns are
+separate findings rather than one experiment. In the simulator the two methods
+are level on SLO violations (0.026 vs 0.026); the decision-level harness is
+where the reliability difference appears, because it removes queueing noise.
+
+**Data:** 200 workloads from the Kubernetes Serverless Workload Dataset —
+14-day per-minute traces derived from Azure Functions — split by workload so no
+trace appears in both training and test.
+"""
     )
 
-    c1, c2 = st.columns([2, 3])
-    with c1:
-        st.plotly_chart(charts.capacity_ladder(CAPACITY_LADDER), width="stretch")
-    with c2:
-        st.subheader("Why hedging stalls")
-        st.markdown(
-            "Our rule sizes for the **most demanding archetype in the set**. "
-            "That adds capacity only when the set contains something more "
-            "demanding than the top-ranked prediction."
-        )
-        st.markdown(
-            "- Top-1 is PERIODIC (1.33×), set also holds STATIONARY (1.82×) → "
-            "hedging adds **37%** capacity. It helps.\n"
-            "- Top-1 is SPIKE (3.33×), the highest rung → `max` returns the "
-            "same answer. Hedging adds **nothing**."
-        )
-        st.markdown(
-            "AAPA's margin has no ceiling: it multiplies *on top of* the "
-            "target, so it keeps adding capacity exactly where it is needed. "
-            "That is why it wins once SPIKE is present."
-        )
-
-    st.markdown("---")
-    st.subheader("Measured with SPIKE restored")
-    spike_exp = next((e for e in experiments if e.key == "spike"), None)
-    if spike_exp:
-        spike_dec, _ = get_run(spike_exp)
-        spike_stats = summarise(focus(spike_dec, focus_mode, show_control))
-        show = spike_stats[["label", "failures", "rate", "pods"]].copy()
-        show.columns = ["Controller", "Failures", "Violation rate", "Mean pods"]
-        st.dataframe(
-            show.style.format({
-                "Failures": "{:,.0f}", "Violation rate": "{:.4f}", "Mean pods": "{:.1f}",
-            }),
-            width="stretch", hide_index=True,
-        )
-        if OURS in spike_stats.index and CONTROL in spike_stats.index:
-            st.error(
-                f"Our controller records "
-                f"**{int(spike_stats.loc[OURS].failures):,}** failures against "
-                f"the ablation control's "
-                f"**{int(spike_stats.loc[CONTROL].failures):,}** — effectively "
-                f"identical. With SPIKE present the prediction set contributes "
-                f"nothing, exactly as the ladder predicts."
-            )
-    else:
-        st.info("The SPIKE-inclusive run is not available in this workspace.")
-
-    st.markdown("---")
-    st.subheader("Where this leads")
+with st.expander("Scope and limitations"):
     st.markdown(
-        "The method answers *which archetype is this?* when the question that "
-        "decides success is *how much capacity do I need?* Those coincide only "
-        "while the archetype-to-capacity mapping has headroom left."
+        """
+**The compute saving is an aggregate.** We are *more* expensive on 95.8% of
+individual windows (+1 to +2 pods). The saving comes from roughly 2,000 large
+windows where AAPA's multiplicative margin scales with the provisioning base
+while our hedging is bounded by the archetype capacity ladder. Total compute is
+lower; the typical decision costs slightly more.
+
+**There is a capacity ceiling.** Archetypes form a ladder — PERIODIC 1.33×,
+RAMP 1.67×, STATIONARY 1.82×, SPIKE 3.33×. Taking the maximum over the
+prediction set adds capacity only when the set holds something more demanding
+than the top-ranked guess. When SPIKE is predicted it is already the highest
+rung, so hedging adds nothing and the method degenerates to the control. The
+result above therefore holds where the top-ranked archetype is **not** the most
+resource-intensive one.
+
+**Coverage is not uniform.** PERIODIC coverage measures 0.739 against a 0.90
+target, attributable to drift between calibration and test. Overall coverage
+holds at 0.939.
+
+**Single-seed.** The workload split is the dominant variance source; repeated
+trials with confidence intervals are needed before these numbers are final.
+"""
     )
+
+with st.expander("What we found in the original evaluation"):
     st.markdown(
-        "**Next step — conformal prediction on demand.** Predict next-window "
-        "peak demand directly with a calibrated upper bound, rather than "
-        "classifying archetype and looking up a CPU target. It has no ceiling, "
-        "the guarantee `P(demand ≤ provisioned) ≥ 1−α` *is* the SLO promise "
-        "rather than a proxy, and it bypasses the labelling and filtering "
-        "defects upstream entirely."
+        """
+Three defects were identified while reproducing AAPA, each inflating the
+apparent reliability of the published classifier:
+
+1. **The train/test split leaks.** It splits by day, so the same workload
+   appears in training and test. Archetype is constant per workload, so the
+   classifier can memorise rather than generalise. Fixing it: accuracy
+   96.4% → 90.7%, and predictions naming a single archetype collapse from
+   **95.2% → 1.4%**. The confidence was an artefact.
+
+2. **The labels are circular.** Weak-supervision labels are computed from the
+   same statistics given to the classifier as features, and agree with the
+   dataset's ground-truth archetypes only **18.6%** of the time — which
+   explains the reported 99.8% accuracy.
+
+3. **SPIKE is deleted before evaluation.** A filter drops workloads active in
+   fewer than 10% of minutes. Bursty traffic is idle by definition, so it
+   removes **42 of 43 SPIKE workloads** — the archetype the paper's strongest
+   claims rest on.
+"""
     )
+
+st.caption(
+    "Conformal implementation cross-validated against MAPIE: LAC agrees "
+    "set-for-set at every α; randomised APS agrees on coverage and set size. "
+    "Full detail in OPTIMIZATION_ROADMAP.md and AAPA_Conformal_Report.docx."
+)

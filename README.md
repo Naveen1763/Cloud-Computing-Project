@@ -47,27 +47,21 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Opens a dashboard at `http://localhost:8501` presenting every saved
-experiment. It reads the result files directly and recomputes nothing, so it
-loads instantly.
+Opens a single page at `http://localhost:8501` comparing **AAPA (the paper's
+method) against ours** on the three metrics where they differ:
 
-| Page | Shows |
-|---|---|
-| **Overview** | Headline metrics, failures chart, full results table |
-| **Controller comparison** | Failures and cost/reliability charts, clean vs ambiguous split, per-archetype breakdown |
-| **Evaluation findings** | The three defects found in the original evaluation, each with before/after |
-| **Conformal analysis** | Coverage, set-size distribution, per-class coverage, MAPIE validation |
-| **Stability & churn** | Scaling actions per controller, three-axis comparison, metric-separation analysis |
-| **Limitation** | The capacity ladder and why set-based hedging stalls on SPIKE |
+| Metric | AAPA | Ours | |
+|---|---|---|---|
+| SLO violations | 78 | **47** | −40% |
+| Compute (pods) | 539.4 | **531.3** | −1.5% |
+| Scaling actions | 47.6 | **1.4** | −97% |
 
-The sidebar switches between four saved runs, so the effect of the train/test
-split and the load regime can be compared side by side.
+One sidebar toggle adds the **ablation control** — our method with the
+prediction set removed — which is the evidence that the set, rather than any
+incidental simplification of AAPA, produces the result.
 
-By default every page shows the headline comparison — **AAPA (the paper's
-method) against ours**. Two sidebar toggles widen it: *Include ablation
-control* adds the no-hedge control that evidences the prediction set is
-responsible, and turning off *AAPA vs ours only* brings in HPA, the generic
-predictive autoscaler and the envelope variant.
+Collapsible sections cover how it was measured, scope and limitations, and the
+three defects found in the original evaluation.
 
 For a terminal summary instead:
 
